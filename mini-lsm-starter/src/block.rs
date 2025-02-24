@@ -19,12 +19,21 @@ mod builder;
 mod iterator;
 
 pub use builder::BlockBuilder;
-use bytes::Bytes;
+use bytes::{Buf, BufMut, Bytes};
 pub use iterator::BlockIterator;
+
+pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
+// def KEY_LEN_SIZE, OFFSET_SIZE, VALUE_LEN_SIZE, EXTRA_FIELD_SIZE
+pub(crate) const KEY_LEN_SIZE: usize = SIZEOF_U16;
+pub(crate) const VALUE_LEN_SIZE: usize = SIZEOF_U16;
+pub(crate) const OFFSET_SIZE: usize = SIZEOF_U16;
+pub(crate) const EXTRA_FIELD_SIZE: usize = SIZEOF_U16;
 
 /// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
 pub struct Block {
+    /// All serialized key-value pairs in the block. [Entry] = [key_len (2B) | key (keylen) | value_len (2B) | value (varlen)]
     pub(crate) data: Vec<u8>,
+    /// Offsets of each key-value entries.
     pub(crate) offsets: Vec<u16>,
 }
 
@@ -32,11 +41,29 @@ impl Block {
     /// Encode the internal data to the data layout illustrated in the course
     /// Note: You may want to recheck if any of the expected field is missing from your output
     pub fn encode(&self) -> Bytes {
-        unimplemented!()
+        let mut buf: Vec<u8> = self.data.clone();
+        let offsets_len = self.offsets.len();
+        for offset in &self.offsets {
+            buf.put_u16(*offset);
+        }
+        // Adds number of elements at the end of the block
+        buf.put_u16(offsets_len as u16);
+        buf.into()
     }
 
-    /// Decode from the data layout, transform the input `data` to a single `Block`
+    /// Decode from the data layout into Block struct
     pub fn decode(data: &[u8]) -> Self {
-        unimplemented!()
+        // get number of elements in the block
+        let offsets_len = (&data[data.len() - EXTRA_FIELD_SIZE..]).get_u16() as usize;
+        let data_end: usize = data.len() - EXTRA_FIELD_SIZE - offsets_len * OFFSET_SIZE;
+        let offsets_raw = &data[data_end..data.len() - EXTRA_FIELD_SIZE];
+        // decode offset array
+        let offsets = offsets_raw
+            .chunks(OFFSET_SIZE)
+            .map(|mut x| x.get_u16())
+            .collect();
+        // get data
+        let data = data[0..data_end].to_vec();
+        Self { data, offsets }
     }
 }
