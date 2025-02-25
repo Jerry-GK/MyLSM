@@ -23,9 +23,9 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 pub use builder::SsTableBuilder;
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 pub use iterator::SsTableIterator;
 
 use crate::block::Block;
@@ -34,7 +34,15 @@ use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
 
+pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();
+pub(crate) const TABLE_BLOCK_META_LEN_SIZE: usize = SIZEOF_U32;
+pub(crate) const TABLE_BLOCK_CHECKSUM_SIZE: usize = SIZEOF_U32;
+pub(crate) const TABLE_META_CHECKSUM_SIZE: usize = SIZEOF_U32;
+pub(crate) const TABLE_OFFSET_SIZE: usize = SIZEOF_U32;
+pub(crate) const TABLE_EXTRA_FIELD_SIZE: usize = SIZEOF_U32;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
+
 pub struct BlockMeta {
     /// Offset of this data block.
     pub offset: usize,
@@ -48,17 +56,53 @@ impl BlockMeta {
     /// Encode block meta to a buffer.
     /// You may add extra fields to the buffer,
     /// in order to help keep track of `first_key` when decoding from the same buffer in the future.
+    /// BlockMeta = BlockMetaLen + [BlockMetaEntry] * BlockMetaLen + Checksum
     pub fn encode_block_meta(
         block_meta: &[BlockMeta],
         #[allow(clippy::ptr_arg)] // remove this allow after you finish
         buf: &mut Vec<u8>,
-    ) {
-        unimplemented!()
+        block_meta_estimated_size: usize,
+    ) { 
+        let reserved_size = TABLE_BLOCK_META_LEN_SIZE + block_meta_estimated_size + TABLE_META_CHECKSUM_SIZE;
+        buf.reserve(reserved_size);
+        buf.put_u32(block_meta.len() as u32);
+        let checksum_calc_offset = buf.len(); // checksum only hash BlockMeta Entries
+        for meta in block_meta {
+            buf.put_u32(meta.offset as u32);
+            buf.put_u16(meta.first_key.len() as u16);
+            buf.put_slice(meta.first_key.raw_ref());
+            buf.put_u16(meta.last_key.len() as u16);
+            buf.put_slice(meta.last_key.raw_ref());
+        }
+        buf.put_u32(crc32fast::hash(&buf[checksum_calc_offset..]));
+        assert_eq!(
+            reserved_size,
+            buf.len() - checksum_calc_offset + TABLE_BLOCK_META_LEN_SIZE
+        );
     }
 
     /// Decode block meta from a buffer.
-    pub fn decode_block_meta(buf: impl Buf) -> Vec<BlockMeta> {
-        unimplemented!()
+    pub fn decode_block_meta(mut buf: &[u8]) -> Result<Vec<BlockMeta>> {
+        let mut block_meta = Vec::new();
+        let block_meta_len: usize = buf.get_u32() as usize;
+        let checksum = crc32fast::hash(&buf[..buf.remaining() - TABLE_META_CHECKSUM_SIZE]);
+        for _ in 0..block_meta_len {
+            let offset = buf.get_u32() as usize;
+            let first_key_len = buf.get_u16() as usize;
+            let first_key = KeyBytes::from_bytes(buf.copy_to_bytes(first_key_len));
+            let last_key_len: usize = buf.get_u16() as usize;
+            let last_key = KeyBytes::from_bytes(buf.copy_to_bytes(last_key_len));
+            block_meta.push(BlockMeta {
+                offset,
+                first_key,
+                last_key,
+            });
+        }
+        if buf.get_u32() != checksum {
+            bail!("meta checksum mismatched");
+        }
+
+        Ok(block_meta)
     }
 }
 
@@ -120,9 +164,29 @@ impl SsTable {
         Self::open(0, None, file)
     }
 
-    /// Open SSTable from a file.
+    /// Open SSTable from a file. (Load block meta into memory)
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
-        unimplemented!()
+        let len = file.size();
+
+        let raw_meta_offset = file.read(
+            len - TABLE_EXTRA_FIELD_SIZE as u64,
+            TABLE_EXTRA_FIELD_SIZE as u64,
+        )?;
+        let block_meta_offset = (&raw_meta_offset[..]).get_u32() as u64;
+        let raw_meta = file.read(block_meta_offset, len - block_meta_offset - TABLE_EXTRA_FIELD_SIZE as u64)?;
+        let block_meta = BlockMeta::decode_block_meta(&raw_meta[..])?;
+
+        Ok(Self {
+            file,
+            first_key: block_meta.first().unwrap().first_key.clone(),
+            last_key: block_meta.last().unwrap().last_key.clone(),
+            block_meta,
+            block_meta_offset: block_meta_offset as usize,
+            id,
+            block_cache,
+            bloom: None,
+            max_ts: 0,
+        })
     }
 
     /// Create a mock SST with only first key + last key metadata
@@ -147,7 +211,21 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        let offset = self.block_meta[block_idx].offset;
+        let offset_end = self
+            .block_meta
+            .get(block_idx + 1)
+            .map_or(self.block_meta_offset, |x| x.offset);
+        let block_len = offset_end - offset - TABLE_BLOCK_CHECKSUM_SIZE;
+        let block_data_with_checksum: Vec<u8> = self
+            .file
+            .read(offset as u64, (offset_end - offset) as u64)?; // IO here! time consuming
+        let block_data: &[u8] = &block_data_with_checksum[..block_len];
+        let checksum = (&block_data_with_checksum[block_len..]).get_u32();
+        if checksum != crc32fast::hash(block_data) {
+            bail!("block checksum mismatched");
+        }
+        Ok(Arc::new(Block::decode(block_data)))
     }
 
     /// Read a block from disk, with block cache. (Day 4)
@@ -159,7 +237,9 @@ impl SsTable {
     /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
     /// You may also assume the key-value pairs stored in each consecutive block are sorted.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        unimplemented!()
+        self.block_meta
+            .partition_point(|meta| meta.first_key.as_key_slice() <= key) // this method uses binary search
+            .saturating_sub(1)
     }
 
     /// Get number of data blocks.

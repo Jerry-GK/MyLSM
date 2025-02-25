@@ -44,7 +44,7 @@ pub struct BlockMeta {
 impl BlockMeta {
     /// Encode block meta to a buffer.
     pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
-        let mut estimated_size = std::mem::size_of::<u32>();
+        let mut estimated_size: usize = std::mem::size_of::<u32>();
         for meta in block_meta {
             // The size of offset
             estimated_size += std::mem::size_of::<u32>();
@@ -157,14 +157,14 @@ impl SsTable {
 
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
-        let len = file.size();
+        let len: u64 = file.size();
         let raw_bloom_offset = file.read(len - 4, 4)?;
         let bloom_offset = (&raw_bloom_offset[..]).get_u32() as u64;
         let raw_bloom = file.read(bloom_offset, len - 4 - bloom_offset)?;
         let bloom_filter = Bloom::decode(&raw_bloom)?;
         let raw_meta_offset = file.read(bloom_offset - 4, 4)?;
         let block_meta_offset = (&raw_meta_offset[..]).get_u32() as u64;
-        let raw_meta = file.read(block_meta_offset, bloom_offset - 4 - block_meta_offset)?;
+        let raw_meta: Vec<u8> = file.read(block_meta_offset, bloom_offset - 4 - block_meta_offset)?;
         let block_meta = BlockMeta::decode_block_meta(&raw_meta[..])?;
         Ok(Self {
             file,
