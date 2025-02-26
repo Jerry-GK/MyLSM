@@ -122,10 +122,10 @@ impl SsTableBuilder {
         let encoded_block = builder.build().encode();
 
         self.block_meta_estimated_size += TABLE_OFFSET_SIZE
-        + KEY_LEN_SIZE
-        + self.first_key.len()
-        + KEY_LEN_SIZE
-        + self.last_key.len();
+            + KEY_LEN_SIZE
+            + self.first_key.len()
+            + KEY_LEN_SIZE
+            + self.last_key.len();
 
         self.meta.push(BlockMeta {
             offset: self.data.len(),

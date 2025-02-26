@@ -62,8 +62,9 @@ impl BlockMeta {
         #[allow(clippy::ptr_arg)] // remove this allow after you finish
         buf: &mut Vec<u8>,
         block_meta_estimated_size: usize,
-    ) { 
-        let reserved_size = TABLE_BLOCK_META_LEN_SIZE + block_meta_estimated_size + TABLE_META_CHECKSUM_SIZE;
+    ) {
+        let reserved_size =
+            TABLE_BLOCK_META_LEN_SIZE + block_meta_estimated_size + TABLE_META_CHECKSUM_SIZE;
         buf.reserve(reserved_size);
         buf.put_u32(block_meta.len() as u32);
         let checksum_calc_offset = buf.len(); // checksum only hash BlockMeta Entries
@@ -173,7 +174,10 @@ impl SsTable {
             TABLE_EXTRA_FIELD_SIZE as u64,
         )?;
         let block_meta_offset = (&raw_meta_offset[..]).get_u32() as u64;
-        let raw_meta = file.read(block_meta_offset, len - block_meta_offset - TABLE_EXTRA_FIELD_SIZE as u64)?;
+        let raw_meta = file.read(
+            block_meta_offset,
+            len - block_meta_offset - TABLE_EXTRA_FIELD_SIZE as u64,
+        )?;
         let block_meta = BlockMeta::decode_block_meta(&raw_meta[..])?;
 
         Ok(Self {
@@ -230,16 +234,24 @@ impl SsTable {
 
     /// Read a block from disk, with block cache. (Day 4)
     pub fn read_block_cached(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        if let Some(ref block_cache) = self.block_cache {
+            let blk = block_cache
+                .try_get_with((self.id, block_idx), || self.read_block(block_idx))
+                .map_err(|e| anyhow!("{}", e))?;
+            Ok(blk)
+        } else {
+            self.read_block(block_idx)
+        }
     }
 
     /// Find the block that may contain `key`.
     /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
     /// You may also assume the key-value pairs stored in each consecutive block are sorted.
+    /// Note: If the key is larger than the last key of block[n-1], but smaller than the first key of block[n] (or n > BlockLen), it will return n.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
+        // this method returns the first element that does not satisfy the predicate, using binary search
         self.block_meta
-            .partition_point(|meta| meta.first_key.as_key_slice() <= key) // this method uses binary search
-            .saturating_sub(1)
+            .partition_point(|meta| meta.last_key.as_key_slice() < key)
     }
 
     /// Get number of data blocks.
