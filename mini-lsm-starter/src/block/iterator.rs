@@ -58,7 +58,7 @@ impl BlockIterator {
         iter
     }
 
-    /// Creates a block iterator and seek to the first key that >= `key`, invalid if no such key.
+    /// Creates a block iterator and seek to the first key that >= `key`, invalid if no such key
     pub fn create_and_seek_to_key(block: Arc<Block>, key: KeySlice) -> Self {
         let mut iter = Self::new(block);
         iter.seek_to_key(key);

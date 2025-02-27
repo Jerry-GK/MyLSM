@@ -24,6 +24,7 @@ use super::StorageIterator;
 pub struct TwoMergeIterator<A: StorageIterator, B: StorageIterator> {
     a: A,
     b: B,
+    choose_a: bool,
     // Add fields as need
 }
 
@@ -32,8 +33,31 @@ impl<
         B: 'static + for<'a> StorageIterator<KeyType<'a> = A::KeyType<'a>>,
     > TwoMergeIterator<A, B>
 {
+    // skip b if needed, decide which iterator to choose
+    fn update_status(&mut self) -> Result<()> {
+        // skip b if a and b have the same key
+        if self.a.is_valid() && self.b.is_valid() && self.b.key() == self.a.key() {
+            self.b.next()?;
+        }
+
+        if !self.a.is_valid() {
+            self.choose_a = false;
+        } else if !self.b.is_valid() {
+            self.choose_a = true;
+        } else {
+            self.choose_a = self.a.key() < self.b.key(); // choose the smaller key if both iters are valid (like binary heap)
+        }
+        Ok(())
+    }
+
     pub fn create(a: A, b: B) -> Result<Self> {
-        unimplemented!()
+        let mut iter = Self {
+            a,
+            b,
+            choose_a: true,
+        };
+        iter.update_status()?;
+        Ok(iter)
     }
 }
 
@@ -45,18 +69,40 @@ impl<
     type KeyType<'a> = A::KeyType<'a>;
 
     fn key(&self) -> Self::KeyType<'_> {
-        unimplemented!()
+        if self.choose_a {
+            self.a.key()
+        } else {
+            self.b.key()
+        }
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        if self.choose_a {
+            self.a.value()
+        } else {
+            self.b.value()
+        }
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        if self.choose_a {
+            self.a.is_valid()
+        } else {
+            self.b.is_valid()
+        }
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        if self.choose_a {
+            self.a.next()?;
+        } else {
+            self.b.next()?;
+        }
+        self.update_status()?;
+        Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.a.num_active_iterators() + self.b.num_active_iterators()
     }
 }

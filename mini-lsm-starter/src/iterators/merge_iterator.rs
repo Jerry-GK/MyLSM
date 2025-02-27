@@ -116,7 +116,7 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     fn next(&mut self) -> Result<()> {
         let current = self.current.as_mut().unwrap();
 
-        // this loop pops pops conflict keys with current
+        // this loop pops conflict keys with current
         while let Some(mut inner_iter) = self.iters.peek_mut() {
             // the heap peek must be larger than the current
             debug_assert!(

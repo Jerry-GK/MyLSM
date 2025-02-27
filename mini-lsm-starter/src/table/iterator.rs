@@ -103,7 +103,7 @@ impl StorageIterator for SsTableIterator {
 
     /// Return whether the current block iterator is valid or not.
     fn is_valid(&self) -> bool {
-        self.blk_idx == usize::MAX || self.blk_iter.as_ref().is_some_and(|x| x.is_valid())
+        self.blk_idx != usize::MAX && self.blk_iter.as_ref().is_some_and(|x| x.is_valid())
     }
 
     /// Move to the next `key` in the block.
