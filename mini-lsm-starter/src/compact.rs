@@ -160,7 +160,16 @@ impl LsmStorageInner {
         Ok(None)
     }
 
+    // this function is called every 50ms, trigger force flush if imm_memtable size exceeds
     fn trigger_flush(&self) -> Result<()> {
+        let res = {
+            let state = self.state.read();
+            state.imm_memtables.len() >= self.options.num_memtable_limit
+        };
+        if res {
+            self.force_flush_next_imm_memtable()?;
+        }
+
         Ok(())
     }
 
