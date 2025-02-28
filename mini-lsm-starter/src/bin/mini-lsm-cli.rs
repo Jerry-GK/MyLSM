@@ -26,6 +26,7 @@ use mini_lsm_wrapper::compact::{
 };
 use mini_lsm_wrapper::iterators::StorageIterator;
 use mini_lsm_wrapper::lsm_storage::{LsmStorageOptions, MiniLsm};
+use std::os::macos::raw::stat;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -56,7 +57,10 @@ struct ReplHandler {
 }
 
 impl ReplHandler {
-    fn handle(&mut self, command: &Command) -> Result<()> {
+    fn handle(&mut self, command: &Command) -> Result<u128> {
+        let start = std::time::Instant::now();
+        let mut duration = 0; // microsecond
+
         match command {
             Command::Fill { begin, end } => {
                 for i in *begin..=*end {
@@ -65,6 +69,7 @@ impl ReplHandler {
                         format!("value{}@{}", i, self.epoch).as_bytes(),
                     )?;
                 }
+                duration = start.elapsed().as_micros();
 
                 println!(
                     "{} values filled with epoch {}",
@@ -72,14 +77,25 @@ impl ReplHandler {
                     self.epoch
                 );
             }
+            Command::PUT { key, value } => {
+                self.lsm.put(
+                    format!("{}", key).as_bytes(),
+                    format!("value{}@{}", value, self.epoch).as_bytes(),
+                )?;
+                duration = start.elapsed().as_micros();
+                println!("put success");
+            }
             Command::Del { key } => {
                 self.lsm.delete(key.as_bytes())?;
+                duration = start.elapsed().as_micros();
                 println!("{} deleted", key);
             }
             Command::Get { key } => {
                 if let Some(value) = self.lsm.get(key.as_bytes())? {
+                    duration = start.elapsed().as_micros();
                     println!("{}={:?}", key, value);
                 } else {
+                    duration = start.elapsed().as_micros();
                     println!("{} not exist", key);
                 }
             }
@@ -89,14 +105,23 @@ impl ReplHandler {
                         .lsm
                         .scan(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)?;
                     let mut cnt = 0;
+                    let mut entries = Vec::new();
                     while iter.is_valid() {
-                        println!(
-                            "{:?}={:?}",
-                            Bytes::copy_from_slice(iter.key()),
-                            Bytes::copy_from_slice(iter.value()),
-                        );
+                        entries.push((
+                            iter.key().to_vec(),
+                            iter.value().to_vec(),
+                        ));
                         iter.next()?;
                         cnt += 1;
+                    }
+                    duration = start.elapsed().as_micros();
+
+                    for (key, value) in entries {
+                        println!(
+                            "{:?}={:?}",
+                            Bytes::copy_from_slice(&key),
+                            Bytes::copy_from_slice(&value)
+                        );
                     }
                     println!();
                     println!("{} keys scanned", cnt);
@@ -107,14 +132,23 @@ impl ReplHandler {
                         std::ops::Bound::Included(end.as_bytes()),
                     )?;
                     let mut cnt = 0;
+                    let mut entries = Vec::new();
                     while iter.is_valid() {
-                        println!(
-                            "{:?}={:?}",
-                            Bytes::copy_from_slice(iter.key()),
-                            Bytes::copy_from_slice(iter.value()),
-                        );
+                        entries.push((
+                            iter.key().to_vec(),
+                            iter.value().to_vec(),
+                        ));
                         iter.next()?;
                         cnt += 1;
+                    }
+                    duration = start.elapsed().as_micros();
+
+                    for (key, value) in entries {
+                        println!(
+                            "{:?}={:?}",
+                            Bytes::copy_from_slice(&key),
+                            Bytes::copy_from_slice(&value)
+                        );
                     }
                     println!();
                     println!("{} keys scanned", cnt);
@@ -125,14 +159,17 @@ impl ReplHandler {
             },
             Command::Dump => {
                 self.lsm.dump_structure();
+                duration = start.elapsed().as_micros();
                 println!("dump success");
             }
             Command::Flush => {
                 self.lsm.force_flush()?;
+                duration = start.elapsed().as_micros();
                 println!("flush success");
             }
             Command::FullCompaction => {
                 self.lsm.force_full_compaction()?;
+                duration = start.elapsed().as_micros();
                 println!("full compaction success");
             }
             Command::Quit | Command::Close => {
@@ -143,7 +180,7 @@ impl ReplHandler {
 
         self.epoch += 1;
 
-        Ok(())
+        Ok(duration)
     }
 }
 
@@ -152,6 +189,10 @@ enum Command {
     Fill {
         begin: u64,
         end: u64,
+    },
+    PUT {
+        key: u64,
+        value: u64,
     },
     Del {
         key: String,
@@ -210,6 +251,17 @@ impl Command {
             )(i)
         };
 
+        let put = |i| {
+            map(
+                tuple((tag_no_case("put"), space1, uint, space1, uint)),
+                |(_, _, key, _, value)| Command::PUT {
+                    key: key,
+                    value: value,
+                },
+            )(i)
+        };
+
+
         let get = |i| {
             map(
                 tuple((tag_no_case("get"), space1, string)),
@@ -234,6 +286,7 @@ impl Command {
         let command = |i| {
             alt((
                 fill,
+                put,
                 del,
                 get,
                 scan,
@@ -242,6 +295,7 @@ impl Command {
                 map(tag_no_case("full_compaction"), |_| Command::FullCompaction),
                 map(tag_no_case("quit"), |_| Command::Quit),
                 map(tag_no_case("close"), |_| Command::Close),
+                map(tag_no_case("exit"), |_| Command::Close),
             ))(i)
         };
 
@@ -271,9 +325,18 @@ impl Repl {
                 // Skip noop
                 continue;
             }
-            let command = Command::parse(&readline)?;
-            self.handler.handle(&command)?;
-            self.editor.add_history_entry(readline)?;
+
+            match Command::parse(&readline) {
+                Ok(command) => {
+                    let duration = self.handler.handle(&command)?;
+                    println!("(execution time: {:.4}ms)", (duration as f64) / 1000.0);
+                    self.editor.add_history_entry(readline)?;
+                },
+                Err(e) => {
+                    println!("Invalid command(enter 'close/exit' to exit): {}", e);
+                    continue;
+                }
+            };
         }
     }
 
@@ -331,7 +394,7 @@ fn main() -> Result<()> {
     let lsm = MiniLsm::open(
         args.path,
         LsmStorageOptions {
-            block_size: 4096,
+            block_size: 4096,   // 4KB
             target_sst_size: 2 << 20, // 2MB
             num_memtable_limit: 3,
             compaction_options: match args.compaction {

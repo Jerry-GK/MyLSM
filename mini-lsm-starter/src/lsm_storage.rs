@@ -119,7 +119,7 @@ pub struct LsmStorageOptions {
     pub block_size: usize,
     // SST size in bytes, also the approximate memtable capacity limit
     pub target_sst_size: usize,
-    // Maximum number of memtables in memory, flush to L0 when exceeding this limit
+    // Maximum number of immutable memtables in memory, flush to L0 when exceeding this limit
     pub num_memtable_limit: usize,
     pub compaction_options: CompactionOptions,
     pub enable_wal: bool,
