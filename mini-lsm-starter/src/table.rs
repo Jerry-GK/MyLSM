@@ -23,7 +23,7 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Ok, Result};
 pub use builder::SsTableBuilder;
 use bytes::{Buf, BufMut};
 pub use iterator::SsTableIterator;
@@ -215,6 +215,7 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
+        let mut start = std::time::Instant::now();
         let offset = self.block_meta[block_idx].offset;
         let offset_end = self
             .block_meta
@@ -229,11 +230,24 @@ impl SsTable {
         if checksum != crc32fast::hash(block_data) {
             bail!("block checksum mismatched");
         }
-        Ok(Arc::new(Block::decode(block_data)))
+
+        let duration_io = start.elapsed().as_micros();
+        
+        start = std::time::Instant::now();
+        let block = Arc::new(Block::decode(block_data));
+        let duration_decode = start.elapsed().as_micros();
+
+        println!("(I/O: Read block from disk, sst-{}-block{}, IO cost: {:.4}ms, decode cost: {:.4}ms)", self.sst_id(), block_idx, (duration_io as f64) / 1000.0, (duration_decode as f64) / 1000.0);
+        Ok(block)
     }
 
     /// Read a block from disk, with block cache. (Day 4)
     pub fn read_block_cached(&self, block_idx: usize) -> Result<Arc<Block>> {
+        let enable_block_cache = true; // for test
+        if !enable_block_cache {
+            return self.read_block(block_idx);
+        }
+
         if let Some(ref block_cache) = self.block_cache {
             let blk = block_cache
                 .try_get_with((self.id, block_idx), || self.read_block(block_idx))

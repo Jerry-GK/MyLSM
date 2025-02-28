@@ -77,13 +77,13 @@ impl ReplHandler {
                     self.epoch
                 );
             }
-            Command::PUT { key, value } => {
+            Command::Put { key, value } => {
                 self.lsm.put(
                     format!("{}", key).as_bytes(),
                     format!("value{}@{}", value, self.epoch).as_bytes(),
                 )?;
                 duration = start.elapsed().as_micros();
-                println!("put success");
+                println!("put success with epoch {}", self.epoch);
             }
             Command::Del { key } => {
                 self.lsm.delete(key.as_bytes())?;
@@ -107,10 +107,7 @@ impl ReplHandler {
                     let mut cnt = 0;
                     let mut entries = Vec::new();
                     while iter.is_valid() {
-                        entries.push((
-                            iter.key().to_vec(),
-                            iter.value().to_vec(),
-                        ));
+                        entries.push((iter.key().to_vec(), iter.value().to_vec()));
                         iter.next()?;
                         cnt += 1;
                     }
@@ -134,10 +131,7 @@ impl ReplHandler {
                     let mut cnt = 0;
                     let mut entries = Vec::new();
                     while iter.is_valid() {
-                        entries.push((
-                            iter.key().to_vec(),
-                            iter.value().to_vec(),
-                        ));
+                        entries.push((iter.key().to_vec(), iter.value().to_vec()));
                         iter.next()?;
                         cnt += 1;
                     }
@@ -190,7 +184,7 @@ enum Command {
         begin: u64,
         end: u64,
     },
-    PUT {
+    Put {
         key: u64,
         value: u64,
     },
@@ -254,13 +248,9 @@ impl Command {
         let put = |i| {
             map(
                 tuple((tag_no_case("put"), space1, uint, space1, uint)),
-                |(_, _, key, _, value)| Command::PUT {
-                    key: key,
-                    value: value,
-                },
+                |(_, _, key, _, value)| Command::Put { key, value },
             )(i)
         };
-
 
         let get = |i| {
             map(
@@ -331,7 +321,7 @@ impl Repl {
                     let duration = self.handler.handle(&command)?;
                     println!("(execution time: {:.4}ms)", (duration as f64) / 1000.0);
                     self.editor.add_history_entry(readline)?;
-                },
+                }
                 Err(e) => {
                     println!("Invalid command(enter 'close/exit' to exit): {}", e);
                     continue;
@@ -394,7 +384,7 @@ fn main() -> Result<()> {
     let lsm = MiniLsm::open(
         args.path,
         LsmStorageOptions {
-            block_size: 4096,   // 4KB
+            block_size: 4096,         // 4KB
             target_sst_size: 2 << 20, // 2MB
             num_memtable_limit: 3,
             compaction_options: match args.compaction {

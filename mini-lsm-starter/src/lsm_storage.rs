@@ -290,7 +290,7 @@ impl MiniLsm {
         self.inner.scan(lower, upper)
     }
 
-    /// Only call this in test cases due to race conditions
+    /// Only call this in test cases due to race conditions (or user forced flush for test in some cases)
     pub fn force_flush(&self) -> Result<()> {
         if !self.inner.state.read().memtable.is_empty() {
             self.inner
@@ -308,9 +308,9 @@ impl MiniLsm {
 }
 
 impl LsmStorageInner {
+    // return the id of next sst table to push into the flush queue, which is the id of the latest creaeted immutable memtable
     pub(crate) fn next_sst_id(&self) -> usize {
-        self.next_sst_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.next_sst_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -318,8 +318,8 @@ impl LsmStorageInner {
     pub(crate) fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
         let mut state = LsmStorageState::create(&options);
         let path = path.as_ref();
-        let mut next_sst_id = 1;
-        let block_cache = Arc::new(BlockCache::new(1 << 18)); // 1GB block cache,
+        let mut next_sst_id = 1;    // sst id starts with 1
+        let block_cache = Arc::new(BlockCache::new(1 << 10)); // 1K block cache,
 
         let compaction_controller = match &options.compaction_options {
             CompactionOptions::Leveled(options) => {
@@ -357,15 +357,15 @@ impl LsmStorageInner {
         }
         println!("{} SSTs opened", sst_cnt);
 
-        next_sst_id += 1;
-        state.memtable = Arc::new(MemTable::create(next_sst_id));
+        // TODO: codes about WAL and compaction
 
+        state.memtable = Arc::new(MemTable::create(next_sst_id));
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
             path: path.to_path_buf(),
-            block_cache: Arc::new(BlockCache::new(1024)),
-            next_sst_id: AtomicUsize::new(1),
+            block_cache,
+            next_sst_id: AtomicUsize::new(next_sst_id),
             compaction_controller,
             manifest: None,
             options: options.into(),
@@ -575,6 +575,7 @@ impl LsmStorageInner {
         for table_id in snapshot.l0_sstables.iter() {
             let table: Arc<SsTable> = snapshot.sstables[table_id].clone();
             if range_overlap(
+                // skip SST tables with no range overlap
                 _lower,
                 _upper,
                 table.first_key().as_key_slice(),
