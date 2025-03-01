@@ -26,6 +26,7 @@ use crossbeam_skiplist::map::Entry;
 use crossbeam_skiplist::SkipMap;
 use ouroboros::self_referencing;
 
+use crate::block::{BLOCK_OFFSET_SIZE, KEY_LEN_SIZE, VALUE_LEN_SIZE};
 use crate::iterators::StorageIterator;
 use crate::key::{Key, KeySlice};
 use crate::table::SsTableBuilder;
@@ -99,7 +100,8 @@ impl MemTable {
     /// In week 2, day 6, also flush the data to WAL.
     /// In week 3, day 5, modify the function to use the batch API.
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
-        let estimated_size = _key.len() + _value.len(); // Q: can we estimate more precisely if key exists?
+        let estimated_size =
+            _key.len() + _value.len() + KEY_LEN_SIZE + VALUE_LEN_SIZE + BLOCK_OFFSET_SIZE; // Q: can we estimate the flushed sst table size more precisely?
         self.map
             .insert(Bytes::copy_from_slice(_key), Bytes::copy_from_slice(_value));
         self.approximate_size
@@ -138,7 +140,7 @@ impl MemTable {
         iter
     }
 
-    /// Flush the mem-table to SSTable. Implement in week 1 day 6.
+    /// Flush the mem-table to SSTable. Implement in week 1 day 6. (time consuming on write path)
     pub fn flush(&self, _builder: &mut SsTableBuilder) -> Result<()> {
         for entry in self.map.iter() {
             let key = KeySlice::from_slice(entry.key());

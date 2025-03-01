@@ -63,6 +63,10 @@ impl ReplHandler {
 
         match command {
             Command::Fill { begin, end } => {
+                if *begin > *end {
+                    println!("invalid range in `Fill` command!");
+                    return Ok(0);
+                }
                 for i in *begin..=*end {
                     self.lsm.put(
                         format!("{}", i).as_bytes(),

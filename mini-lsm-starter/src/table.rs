@@ -82,7 +82,7 @@ impl BlockMeta {
         );
     }
 
-    /// Decode block meta from a buffer.
+    /// Decode block meta from a buffer. (time consuming on read path)
     pub fn decode_block_meta(mut buf: &[u8]) -> Result<Vec<BlockMeta>> {
         let mut block_meta = Vec::new();
         let block_meta_len: usize = buf.get_u32() as usize;
@@ -224,7 +224,7 @@ impl SsTable {
         let block_len = offset_end - offset - TABLE_BLOCK_CHECKSUM_SIZE;
         let block_data_with_checksum: Vec<u8> = self
             .file
-            .read(offset as u64, (offset_end - offset) as u64)?; // IO here! time consuming
+            .read(offset as u64, (offset_end - offset) as u64)?; // IO here! (time consuming on read path)
         let block_data: &[u8] = &block_data_with_checksum[..block_len];
         let checksum = (&block_data_with_checksum[block_len..]).get_u32();
         if checksum != crc32fast::hash(block_data) {
@@ -232,12 +232,18 @@ impl SsTable {
         }
 
         let duration_io = start.elapsed().as_micros();
-        
+
         start = std::time::Instant::now();
         let block = Arc::new(Block::decode(block_data));
         let duration_decode = start.elapsed().as_micros();
 
-        println!("(I/O: Read block from disk, sst-{}-block{}, IO cost: {:.4}ms, decode cost: {:.4}ms)", self.sst_id(), block_idx, (duration_io as f64) / 1000.0, (duration_decode as f64) / 1000.0);
+        println!(
+            "(I/O: Read block from disk, sst-{}-block{}, IO cost: {:.4}ms, decode cost: {:.4}ms)",
+            self.sst_id(),
+            block_idx,
+            (duration_io as f64) / 1000.0,
+            (duration_decode as f64) / 1000.0
+        );
         Ok(block)
     }
 

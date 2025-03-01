@@ -66,3 +66,12 @@ impl Block {
         Self { data, offsets }
     }
 }
+
+impl Default for Block {
+    fn default() -> Self {
+        Self {
+            data: Vec::new(),
+            offsets: Vec::new(),
+        }
+    }
+}

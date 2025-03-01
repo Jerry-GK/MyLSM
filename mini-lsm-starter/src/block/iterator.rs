@@ -141,3 +141,15 @@ impl BlockIterator {
         self.idx = idx;
     }
 }
+
+impl Default for BlockIterator {
+    fn default() -> Self {
+        Self {
+            block: Arc::new(Block::default()),
+            key: KeyVec::new(),
+            value_range: (0, 0),
+            idx: 0,
+            first_key: KeyVec::new(),
+        }
+    }
+}

@@ -310,7 +310,9 @@ impl MiniLsm {
 impl LsmStorageInner {
     // return the id of next sst table to push into the flush queue, which is the id of the latest creaeted immutable memtable
     pub(crate) fn next_sst_id(&self) -> usize {
-        self.next_sst_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+        self.next_sst_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -318,7 +320,7 @@ impl LsmStorageInner {
     pub(crate) fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
         let mut state = LsmStorageState::create(&options);
         let path = path.as_ref();
-        let mut next_sst_id = 1;    // sst id starts with 1
+        let mut next_sst_id = 1; // sst id starts with 1
         let block_cache = Arc::new(BlockCache::new(1 << 10)); // 1K block cache,
 
         let compaction_controller = match &options.compaction_options {
@@ -413,23 +415,36 @@ impl LsmStorageInner {
         }
 
         // search the sstables
-        let mut l0_iters = Vec::with_capacity(snapshot.l0_sstables.len());
         // TODO: add bloom fiter to skip unnecessary sstables
 
         for table in snapshot.l0_sstables.iter() {
             let table = snapshot.sstables[table].clone();
-            l0_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
-                table,
-                KeySlice::from_slice(_key),
-            )?));
-        }
-        let l0_iter = MergeIterator::create(l0_iters);
-
-        if l0_iter.is_valid() && l0_iter.key().raw_ref() == _key && !l0_iter.value().is_empty() {
-            return Ok(Some(Bytes::copy_from_slice(l0_iter.value())));
+            let table_iter =
+                SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(_key))?;
+            if table_iter.is_valid() && table_iter.key().raw_ref() == _key {
+                if table_iter.value().is_empty() {
+                    return Ok(None); // it's different from ' b"" '
+                }
+                return Ok(Some(Bytes::copy_from_slice(table_iter.value())));
+            }
         }
 
         Ok(None)
+
+        // let mut l0_iters = Vec::with_capacity(snapshot.l0_sstables.len());
+        // for table in snapshot.l0_sstables.iter() {
+        //     let table = snapshot.sstables[table].clone();
+        //     l0_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
+        //         table,
+        //         KeySlice::from_slice(_key),
+        //     )?));
+        // }
+        // let l0_iter = MergeIterator::create(l0_iters);
+
+        // if l0_iter.is_valid() && l0_iter.key().raw_ref() == _key && !l0_iter.value().is_empty() {
+        //     return Ok(Some(Bytes::copy_from_slice(l0_iter.value())));
+        // }
+        // Ok(None)
     }
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
@@ -494,7 +509,7 @@ impl LsmStorageInner {
         let memtable_id = self.next_sst_id();
 
         let mut guard = self.state.write();
-        let mut snapshot = guard.as_ref().clone();
+        let mut snapshot: LsmStorageState = guard.as_ref().clone();
         snapshot.imm_memtables.insert(0, snapshot.memtable.clone());
         snapshot.memtable = Arc::new(MemTable::create(memtable_id));
         // Update the snapshot.

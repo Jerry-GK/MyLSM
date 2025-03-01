@@ -68,10 +68,7 @@ impl SsTableIterator {
         // Note: If the key is larger than the last key of block[n-1], but smaller than the first key of block[n] (or n > BlockLen), blk_idx will be n.
         let blk_idx = self.table.find_block_idx(key);
         if blk_idx >= self.table.num_of_blocks() {
-            let blk_iter = BlockIterator::create_and_seek_to_key(
-                self.table.read_block_cached(blk_idx - 1)?,
-                key,
-            ); // an invalid iterator of the last block
+            let blk_iter = BlockIterator::default();
             self.blk_idx = usize::MAX;
             assert!(!blk_iter.is_valid());
             return Ok(()); // invalid
