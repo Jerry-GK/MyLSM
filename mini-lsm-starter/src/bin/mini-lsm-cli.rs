@@ -81,6 +81,36 @@ impl ReplHandler {
                     self.epoch
                 );
             }
+            Command::FillRandom { begin, end } => {
+                if *begin > *end {
+                    println!("invalid range in `FillRandom` command!");
+                    return Ok(0);
+                }
+            
+                let mut keys: Vec<u64> = (*begin..=*end).collect();
+                use rand::seq::SliceRandom;
+                use rand::thread_rng;
+                
+                let mut rng = thread_rng();
+                keys.shuffle(&mut rng);
+            
+                for key in keys.iter() {
+                    self.lsm.put(
+                        format!("{}", key).as_bytes(),
+                        format!("value{}@{}", key, self.epoch).as_bytes(),
+                    )?;
+                }
+                
+                duration = start.elapsed().as_micros();
+            
+                println!(
+                    "{} values filled in random order within range [{}, {}] with epoch {}",
+                    end - begin + 1,
+                    begin,
+                    end,
+                    self.epoch
+                );
+            }
             Command::Put { key, value } => {
                 self.lsm.put(
                     format!("{}", key).as_bytes(),
@@ -117,14 +147,15 @@ impl ReplHandler {
                     }
                     duration = start.elapsed().as_micros();
 
-                    for (key, value) in entries {
-                        println!(
-                            "{:?}={:?}",
-                            Bytes::copy_from_slice(&key),
-                            Bytes::copy_from_slice(&value)
-                        );
-                    }
-                    println!();
+                    // // print is time consuming
+                    // for (key, value) in entries {
+                    //     println!(
+                    //         "{:?}={:?}",
+                    //         Bytes::copy_from_slice(&key),
+                    //         Bytes::copy_from_slice(&value)
+                    //     );
+                    // }
+                    // println!();
                     println!("{} keys scanned", cnt);
                 }
                 (Some(begin), Some(end)) => {
@@ -141,14 +172,15 @@ impl ReplHandler {
                     }
                     duration = start.elapsed().as_micros();
 
-                    for (key, value) in entries {
-                        println!(
-                            "{:?}={:?}",
-                            Bytes::copy_from_slice(&key),
-                            Bytes::copy_from_slice(&value)
-                        );
-                    }
-                    println!();
+                    // // print is time consuming
+                    // for (key, value) in entries {
+                    //     println!(
+                    //         "{:?}={:?}",
+                    //         Bytes::copy_from_slice(&key),
+                    //         Bytes::copy_from_slice(&value)
+                    //     );
+                    // }
+                    // println!();
                     println!("{} keys scanned", cnt);
                 }
                 _ => {
@@ -159,9 +191,15 @@ impl ReplHandler {
                 match std::fs::read_to_string(file_name) {
                     Ok(content) => {
                         let mut time_info = Vec::new();
+                        let mut quit = false;
                         for line in content.lines() {
                             match Command::parse(line) {
                                 Ok(command) => {
+                                    // break the loop if command is close
+                                    if let Command::Quit = command {
+                                        quit = true;
+                                        break;
+                                    }
                                     let command_duration = self.handle(&command)?;
                                     duration += command_duration;
                                     time_info.push(format!("(command<{}> - execution time: {:.4}ms)", line, (command_duration as f64) / 1000.0))
@@ -172,10 +210,14 @@ impl ReplHandler {
                                 }
                             };
                         }
-            
+
                         println!("\nexecute script `{}` success", file_name);
                         for info in time_info {
                             println!("{}", info);
+                        }
+                        if quit {
+                            self.lsm.close()?;
+                            std::process::exit(0);
                         }
                     },
                     Err(e) => {
@@ -189,7 +231,7 @@ impl ReplHandler {
                 println!("dump success");
             }
             Command::Flush => {
-                self.lsm.force_flush_all()?;
+                self.lsm.force_flush()?;
                 duration = start.elapsed().as_micros();
                 println!("flush success");
             }
@@ -198,7 +240,7 @@ impl ReplHandler {
                 duration = start.elapsed().as_micros();
                 println!("full compaction success");
             }
-            Command::Quit | Command::Close => {
+            Command::Quit => {
                 self.lsm.close()?;
                 std::process::exit(0);
             }
@@ -213,6 +255,10 @@ impl ReplHandler {
 #[derive(Debug)]
 enum Command {
     Fill {
+        begin: u64,
+        end: u64,
+    },
+    FillRandom {
         begin: u64,
         end: u64,
     },
@@ -238,7 +284,6 @@ enum Command {
     Flush,
     FullCompaction,
     Quit,
-    Close,
 }
 
 impl Command {
@@ -267,6 +312,16 @@ impl Command {
             map(
                 tuple((tag_no_case("fill"), space1, uint, space1, uint)),
                 |(_, _, key, _, value)| Command::Fill {
+                    begin: key,
+                    end: value,
+                },
+            )(i)
+        };
+
+        let fill_random = |i| {
+            map(
+                tuple((tag_no_case("fillrandom"), space1, uint, space1, uint)),
+                |(_, _, key, _, value)| Command::FillRandom {
                     begin: key,
                     end: value,
                 },
@@ -318,6 +373,7 @@ impl Command {
         let command = |i| {
             alt((
                 fill,
+                fill_random,
                 put,
                 del,
                 get,
@@ -327,8 +383,8 @@ impl Command {
                 map(tag_no_case("flush"), |_| Command::Flush),
                 map(tag_no_case("full_compaction"), |_| Command::FullCompaction),
                 map(tag_no_case("quit"), |_| Command::Quit),
-                map(tag_no_case("close"), |_| Command::Close),
-                map(tag_no_case("exit"), |_| Command::Close),
+                map(tag_no_case("close"), |_| Command::Quit),
+                map(tag_no_case("exit"), |_| Command::Quit),
             ))(i)
         };
 
@@ -457,6 +513,8 @@ fn main() -> Result<()> {
             },
             enable_wal: args.enable_wal,
             serializable: args.serializable,
+            block_cache_size: 2 << 25, // 32MB
+            // block_cache_size: 0, // 0MB
         },
     )?;
 

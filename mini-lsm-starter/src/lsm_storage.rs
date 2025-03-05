@@ -128,6 +128,7 @@ pub struct LsmStorageOptions {
     pub compaction_options: CompactionOptions,
     pub enable_wal: bool,
     pub serializable: bool,
+    pub block_cache_size: u64,
 }
 
 impl LsmStorageOptions {
@@ -139,6 +140,7 @@ impl LsmStorageOptions {
             enable_wal: false,
             num_memtable_limit: 50,
             serializable: false,
+            block_cache_size: 1 << 14, // 16KB
         }
     }
 
@@ -150,6 +152,7 @@ impl LsmStorageOptions {
             enable_wal: false,
             num_memtable_limit: 2,
             serializable: false,
+            block_cache_size: 1 << 14, // 16KB
         }
     }
 
@@ -161,6 +164,7 @@ impl LsmStorageOptions {
             enable_wal: false,
             num_memtable_limit: 2,
             serializable: false,
+            block_cache_size: 1 << 14, // 16KB
         }
     }
 }
@@ -294,21 +298,8 @@ impl MiniLsm {
         self.inner.scan(lower, upper)
     }
 
-    /// Only call this in test cases due to race conditions (or user forced flush for test in some cases)
+    /// Flush memtable and all imm memtables, only call this in test cases due to race conditions (or user forced flush for test in some cases)
     pub fn force_flush(&self) -> Result<()> {
-        if !self.inner.state.read().memtable.is_empty() {
-            self.inner
-                .force_freeze_memtable(&self.inner.state_lock.lock())?;
-        }
-        
-        if !self.inner.state.read().imm_memtables.is_empty() {
-            self.inner.force_flush_next_imm_memtable()?;
-        }
-        Ok(())
-    }
-
-    // flush memtable and all imm memtables
-    pub fn force_flush_all(&self) -> Result<()> {
         if !self.inner.state.read().memtable.is_empty() {
             self.inner
                 .force_freeze_memtable(&self.inner.state_lock.lock())?;
@@ -339,7 +330,7 @@ impl LsmStorageInner {
         let mut state = LsmStorageState::create(&options);
         let path = path.as_ref();
         let mut next_sst_id = 1; // sst id starts with 1
-        let block_cache = Arc::new(BlockCache::new(1 << 10)); // 1K block cache,
+        let block_cache = Arc::new(BlockCache::new(options.block_cache_size));
 
         let compaction_controller = match &options.compaction_options {
             CompactionOptions::Leveled(options) => {
