@@ -146,7 +146,7 @@ impl FileObject {
 pub struct SsTable {
     /// The actual storage unit of SsTable, the format is as above.
     pub(crate) file: FileObject,
-    /// The meta blocks that hold info for data blocks.
+    /// The meta blocks that hold info for data blocks (always cached in memory, about 0.2% of data size).
     pub(crate) block_meta: Vec<BlockMeta>,
     /// The offset that indicates the start point of meta blocks in `file`.
     pub(crate) block_meta_offset: usize,
@@ -215,7 +215,7 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
-        let mut start = std::time::Instant::now();
+        // let mut start = std::time::Instant::now();
         let offset = self.block_meta[block_idx].offset;
         let offset_end = self
             .block_meta
@@ -226,24 +226,26 @@ impl SsTable {
             .file
             .read(offset as u64, (offset_end - offset) as u64)?; // IO here! (time consuming on read path)
         let block_data: &[u8] = &block_data_with_checksum[..block_len];
-        let checksum = (&block_data_with_checksum[block_len..]).get_u32();
-        if checksum != crc32fast::hash(block_data) {
-            bail!("block checksum mismatched");
-        }
 
-        let duration_io = start.elapsed().as_micros();
+        // TODO: faster checksum hash to reduce read time
+        // let checksum = (&block_data_with_checksum[block_len..]).get_u32();
+        // if checksum != crc32fast::hash(block_data) {
+        //     bail!("block checksum mismatched");
+        // }
 
-        start = std::time::Instant::now();
+        // let duration_io = start.elapsed().as_micros();
+
+        // start = std::time::Instant::now();
         let block = Arc::new(Block::decode(block_data));
-        let duration_decode = start.elapsed().as_micros();
+        // let duration_decode = start.elapsed().as_micros();
 
-        println!(
-            "(I/O: Read block from disk, sst-{}-block{}, IO cost: {:.4}ms, decode cost: {:.4}ms)",
-            self.sst_id(),
-            block_idx,
-            (duration_io as f64) / 1000.0,
-            (duration_decode as f64) / 1000.0
-        );
+        // println!(
+        //     "(I/O: Read block from disk, sst-{}-block{}, IO cost: {:.4}ms, decode cost: {:.4}ms)",
+        //     self.sst_id(),
+        //     block_idx,
+        //     (duration_io as f64) / 1000.0,
+        //     (duration_decode as f64) / 1000.0
+        // );
         Ok(block)
     }
 
@@ -255,7 +257,7 @@ impl SsTable {
         }
 
         if let Some(ref block_cache) = self.block_cache {
-            let blk = block_cache
+            let blk: Arc<Block> = block_cache
                 .try_get_with((self.id, block_idx), || self.read_block(block_idx))
                 .map_err(|e| anyhow!("{}", e))?;
             Ok(blk)

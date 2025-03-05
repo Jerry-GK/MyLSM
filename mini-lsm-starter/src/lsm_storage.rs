@@ -16,7 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::{BTreeSet, HashMap};
-use std::fs::File;
+use std::fs::{read, File};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
@@ -111,6 +111,10 @@ fn range_overlap(
         _ => {}
     }
     true
+}
+
+fn key_within(user_key: &[u8], table_begin: KeySlice, table_end: KeySlice) -> bool {
+    table_begin.raw_ref() <= user_key && user_key <= table_end.raw_ref()
 }
 
 #[derive(Debug, Clone)]
@@ -296,7 +300,21 @@ impl MiniLsm {
             self.inner
                 .force_freeze_memtable(&self.inner.state_lock.lock())?;
         }
+        
         if !self.inner.state.read().imm_memtables.is_empty() {
+            self.inner.force_flush_next_imm_memtable()?;
+        }
+        Ok(())
+    }
+
+    // flush memtable and all imm memtables
+    pub fn force_flush_all(&self) -> Result<()> {
+        if !self.inner.state.read().memtable.is_empty() {
+            self.inner
+                .force_freeze_memtable(&self.inner.state_lock.lock())?;
+        }
+        
+        while !self.inner.state.read().imm_memtables.is_empty() {
             self.inner.force_flush_next_imm_memtable()?;
         }
         Ok(())
@@ -417,16 +435,25 @@ impl LsmStorageInner {
         // search the sstables
         // TODO: add bloom fiter to skip unnecessary sstables
 
+        let mut read_table_cnt = 0;
         for table in snapshot.l0_sstables.iter() {
             let table = snapshot.sstables[table].clone();
-            let table_iter =
-                SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(_key))?;
-            if table_iter.is_valid() && table_iter.key().raw_ref() == _key {
-                if table_iter.value().is_empty() {
-                    return Ok(None); // it's different from ' b"" '
+            if key_within(
+                    _key,
+                    table.first_key().as_key_slice(),
+                    table.last_key().as_key_slice(),
+            ) {
+                let table_iter = SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(_key))?;
+                read_table_cnt += 1;
+                if table_iter.is_valid() && table_iter.key().raw_ref() == _key {
+                    if table_iter.value().is_empty() {
+                        return Ok(None); // it's different from ' b"" '
+                    }
+                    // println!("{} SSTs read", read_table_cnt); // for debug test
+                    return Ok(Some(Bytes::copy_from_slice(table_iter.value())));
                 }
-                return Ok(Some(Bytes::copy_from_slice(table_iter.value())));
             }
+            // else skip this table
         }
 
         Ok(None)
@@ -618,6 +645,7 @@ impl LsmStorageInner {
         }
 
         // TODO: the iterators for L1 - L_max
+        
         let l0_iter = MergeIterator::create(table_iters);
         let iter = TwoMergeIterator::create(memtable_iter, l0_iter)?;
         Ok(FusedIterator::new(LsmIterator::new(

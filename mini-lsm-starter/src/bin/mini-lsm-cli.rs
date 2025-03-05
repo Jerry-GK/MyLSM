@@ -155,13 +155,41 @@ impl ReplHandler {
                     println!("invalid command");
                 }
             },
+            Command::Execute { file_name } => {
+                match std::fs::read_to_string(file_name) {
+                    Ok(content) => {
+                        let mut time_info = Vec::new();
+                        for line in content.lines() {
+                            match Command::parse(line) {
+                                Ok(command) => {
+                                    let command_duration = self.handle(&command)?;
+                                    duration += command_duration;
+                                    time_info.push(format!("(command<{}> - execution time: {:.4}ms)", line, (command_duration as f64) / 1000.0))
+                                }
+                                Err(e) => {
+                                    println!("Invalid command: {}", e);
+                                    continue;
+                                }
+                            };
+                        }
+            
+                        println!("\nexecute script `{}` success", file_name);
+                        for info in time_info {
+                            println!("{}", info);
+                        }
+                    },
+                    Err(e) => {
+                        println!("Failed to read script `{}`: {}", file_name, e);
+                    }
+                }
+            }
             Command::Dump => {
                 self.lsm.dump_structure();
                 duration = start.elapsed().as_micros();
                 println!("dump success");
             }
             Command::Flush => {
-                self.lsm.force_flush()?;
+                self.lsm.force_flush_all()?;
                 duration = start.elapsed().as_micros();
                 println!("flush success");
             }
@@ -201,6 +229,9 @@ enum Command {
     Scan {
         begin: Option<String>,
         end: Option<String>,
+    },
+    Execute {
+        file_name: String,
     },
 
     Dump,
@@ -277,6 +308,13 @@ impl Command {
             )(i)
         };
 
+        let execute = |i| {
+            map(
+                tuple((tag_no_case("execute"), space1, string)),
+                |(_, _, file_name)| Command::Execute { file_name },
+            )(i)
+        };
+
         let command = |i| {
             alt((
                 fill,
@@ -284,6 +322,7 @@ impl Command {
                 del,
                 get,
                 scan,
+                execute,
                 map(tag_no_case("dump"), |_| Command::Dump),
                 map(tag_no_case("flush"), |_| Command::Flush),
                 map(tag_no_case("full_compaction"), |_| Command::FullCompaction),

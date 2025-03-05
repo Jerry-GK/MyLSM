@@ -133,7 +133,9 @@ impl SsTableBuilder {
             last_key: std::mem::take(&mut self.last_key).into_key_bytes(),
         });
 
-        let checksum: u32 = crc32fast::hash(&encoded_block);
+        // TODO: faster checksum hash to reduce block write time
+        // let checksum: u32 = crc32fast::hash(&encoded_block);
+        let checksum: u32 = 0;
         self.data.extend(encoded_block);
         self.data.put_u32(checksum);
     }
