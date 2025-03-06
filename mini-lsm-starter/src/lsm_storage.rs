@@ -304,7 +304,7 @@ impl MiniLsm {
             self.inner
                 .force_freeze_memtable(&self.inner.state_lock.lock())?;
         }
-        
+
         while !self.inner.state.read().imm_memtables.is_empty() {
             self.inner.force_flush_next_imm_memtable()?;
         }
@@ -429,12 +429,23 @@ impl LsmStorageInner {
         let mut read_table_cnt = 0;
         for table in snapshot.l0_sstables.iter() {
             let table = snapshot.sstables[table].clone();
-            if key_within(
-                    _key,
-                    table.first_key().as_key_slice(),
-                    table.last_key().as_key_slice(),
+            let mut pruned = false;
+            if !key_within(
+                _key,
+                table.first_key().as_key_slice(),
+                table.last_key().as_key_slice(),
             ) {
-                let table_iter = SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(_key))?;
+                pruned = true;
+            }
+            if let Some(bloom) = &table.bloom {
+                if !bloom.may_contain(farmhash::fingerprint32(_key)) {
+                    pruned = true;
+                }
+            }
+
+            if !pruned {
+                let table_iter =
+                    SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(_key))?;
                 read_table_cnt += 1;
                 if table_iter.is_valid() && table_iter.key().raw_ref() == _key {
                     if table_iter.value().is_empty() {
@@ -636,7 +647,7 @@ impl LsmStorageInner {
         }
 
         // TODO: the iterators for L1 - L_max
-        
+
         let l0_iter = MergeIterator::create(table_iters);
         let iter = TwoMergeIterator::create(memtable_iter, l0_iter)?;
         Ok(FusedIterator::new(LsmIterator::new(

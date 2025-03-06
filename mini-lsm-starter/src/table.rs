@@ -38,8 +38,9 @@ pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();
 pub(crate) const TABLE_BLOCK_META_LEN_SIZE: usize = SIZEOF_U32;
 pub(crate) const TABLE_BLOCK_CHECKSUM_SIZE: usize = SIZEOF_U32;
 pub(crate) const TABLE_META_CHECKSUM_SIZE: usize = SIZEOF_U32;
-pub(crate) const TABLE_OFFSET_SIZE: usize = SIZEOF_U32;
-pub(crate) const TABLE_EXTRA_FIELD_SIZE: usize = SIZEOF_U32;
+pub(crate) const TABLE_META_ENTRY_OFFSET_SIZE: usize = SIZEOF_U32;
+pub(crate) const TABLE_META_OFFSET_SIZE: usize = SIZEOF_U32;
+pub(crate) const TABLE_BLOOM_OFFSET_SIZE: usize = SIZEOF_U32;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 
@@ -82,11 +83,11 @@ impl BlockMeta {
         );
     }
 
-    /// Decode block meta from a buffer. (time consuming on read path)
+    /// Decode block meta from a buffer.
     pub fn decode_block_meta(mut buf: &[u8]) -> Result<Vec<BlockMeta>> {
         let mut block_meta = Vec::new();
         let block_meta_len: usize = buf.get_u32() as usize;
-        let checksum = crc32fast::hash(&buf[..buf.remaining() - TABLE_META_CHECKSUM_SIZE]);
+        let checksum: u32 = crc32fast::hash(&buf[..buf.remaining() - TABLE_META_CHECKSUM_SIZE]);
         for _ in 0..block_meta_len {
             let offset = buf.get_u32() as usize;
             let first_key_len = buf.get_u16() as usize;
@@ -169,14 +170,25 @@ impl SsTable {
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let len = file.size();
 
+        let raw_bloom_offset = file.read(
+            len - TABLE_BLOOM_OFFSET_SIZE as u64,
+            TABLE_BLOOM_OFFSET_SIZE as u64,
+        )?;
+        let bloom_offset = (&raw_bloom_offset[..]).get_u32() as u64;
+        let raw_bloom = file.read(
+            bloom_offset,
+            len - bloom_offset - TABLE_BLOOM_OFFSET_SIZE as u64,
+        )?;
+        let bloom_filter = Bloom::decode(&raw_bloom)?;
+
         let raw_meta_offset = file.read(
-            len - TABLE_EXTRA_FIELD_SIZE as u64,
-            TABLE_EXTRA_FIELD_SIZE as u64,
+            bloom_offset - TABLE_META_OFFSET_SIZE as u64,
+            TABLE_META_OFFSET_SIZE as u64,
         )?;
         let block_meta_offset = (&raw_meta_offset[..]).get_u32() as u64;
         let raw_meta = file.read(
             block_meta_offset,
-            len - block_meta_offset - TABLE_EXTRA_FIELD_SIZE as u64,
+            bloom_offset - block_meta_offset - TABLE_META_OFFSET_SIZE as u64,
         )?;
         let block_meta = BlockMeta::decode_block_meta(&raw_meta[..])?;
 
@@ -188,7 +200,7 @@ impl SsTable {
             block_meta_offset: block_meta_offset as usize,
             id,
             block_cache,
-            bloom: None,
+            bloom: Some(bloom_filter),
             max_ts: 0,
         })
     }

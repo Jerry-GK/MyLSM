@@ -25,8 +25,8 @@ pub use iterator::BlockIterator;
 pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
 pub(crate) const KEY_LEN_SIZE: usize = SIZEOF_U16;
 pub(crate) const VALUE_LEN_SIZE: usize = SIZEOF_U16;
-pub(crate) const BLOCK_OFFSET_SIZE: usize = SIZEOF_U16;
-pub(crate) const BLOCK_EXTRA_FIELD_SIZE: usize = SIZEOF_U16;
+pub(crate) const BLOCK_DATA_ENTRY_OFFSET_SIZE: usize = SIZEOF_U16;
+pub(crate) const BLOCK_NUM_ELEMENT_SIZE: usize = SIZEOF_U16;
 
 /// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
 pub struct Block {
@@ -53,12 +53,13 @@ impl Block {
     /// Decode from the data layout into Block struct
     pub fn decode(data: &[u8]) -> Self {
         // get number of elements in the block
-        let offsets_len = (&data[data.len() - BLOCK_EXTRA_FIELD_SIZE..]).get_u16() as usize;
-        let data_end: usize = data.len() - BLOCK_EXTRA_FIELD_SIZE - offsets_len * BLOCK_OFFSET_SIZE;
-        let offsets_raw = &data[data_end..data.len() - BLOCK_EXTRA_FIELD_SIZE];
+        let offsets_len = (&data[data.len() - BLOCK_NUM_ELEMENT_SIZE..]).get_u16() as usize;
+        let data_end: usize =
+            data.len() - BLOCK_NUM_ELEMENT_SIZE - offsets_len * BLOCK_DATA_ENTRY_OFFSET_SIZE;
+        let offsets_raw = &data[data_end..data.len() - BLOCK_NUM_ELEMENT_SIZE];
         // decode offset array
         let offsets = offsets_raw
-            .chunks(BLOCK_OFFSET_SIZE)
+            .chunks(BLOCK_DATA_ENTRY_OFFSET_SIZE)
             .map(|mut x| x.get_u16())
             .collect();
         // get data

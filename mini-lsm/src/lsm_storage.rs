@@ -94,6 +94,7 @@ pub struct LsmStorageOptions {
     pub compaction_options: CompactionOptions,
     pub enable_wal: bool,
     pub serializable: bool,
+    pub block_cache_size: usize,
 }
 
 impl LsmStorageOptions {
@@ -105,6 +106,7 @@ impl LsmStorageOptions {
             enable_wal: false,
             num_memtable_limit: 50,
             serializable: false,
+            block_cache_size: 1 << 22, // 4MB
         }
     }
 
@@ -116,6 +118,7 @@ impl LsmStorageOptions {
             enable_wal: false,
             num_memtable_limit: 2,
             serializable: false,
+            block_cache_size: 1 << 22, // 4MB
         }
     }
 
@@ -127,6 +130,7 @@ impl LsmStorageOptions {
             enable_wal: false,
             num_memtable_limit: 2,
             serializable: false,
+            block_cache_size: 1 << 22, // 4MB
         }
     }
 }

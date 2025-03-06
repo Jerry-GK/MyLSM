@@ -22,10 +22,15 @@ use anyhow::Result;
 use bytes::BufMut;
 
 use super::bloom::Bloom;
-use super::{BlockMeta, FileObject, SsTable, TABLE_EXTRA_FIELD_SIZE, TABLE_OFFSET_SIZE};
-use crate::block::{BlockBuilder, BLOCK_OFFSET_SIZE, KEY_LEN_SIZE, SIZEOF_U16};
+use super::{
+    BlockMeta, FileObject, SsTable, TABLE_BLOOM_OFFSET_SIZE, TABLE_META_ENTRY_OFFSET_SIZE,
+    TABLE_META_OFFSET_SIZE,
+};
+use crate::block::{BlockBuilder, BLOCK_DATA_ENTRY_OFFSET_SIZE, KEY_LEN_SIZE, SIZEOF_U16};
 use crate::key::{KeySlice, KeyVec};
 use crate::lsm_storage::BlockCache;
+
+const BLOOM_EXPECTED_FALSE_POSITIVE_RATE: f64 = 0.01;
 
 /// Builds an SSTable from key-value pairs.
 pub struct SsTableBuilder {
@@ -36,6 +41,7 @@ pub struct SsTableBuilder {
     pub(crate) meta: Vec<BlockMeta>,
     block_meta_estimated_size: usize,
     block_size: usize,
+    key_hashes: Vec<u32>,
 }
 
 impl SsTableBuilder {
@@ -49,6 +55,7 @@ impl SsTableBuilder {
             block_size,
             block_meta_estimated_size: 0,
             builder: BlockBuilder::new(block_size),
+            key_hashes: Vec::new(),
         }
     }
 
@@ -60,6 +67,8 @@ impl SsTableBuilder {
         if self.first_key.is_empty() {
             self.first_key.set_from_slice(key);
         }
+
+        self.key_hashes.push(farmhash::fingerprint32(key.raw_ref()));
 
         if self.builder.add(key, value) {
             self.last_key.set_from_slice(key);
@@ -75,9 +84,12 @@ impl SsTableBuilder {
         self.last_key.set_from_slice(key);
     }
 
-    /// Get the estimated size of the SSTable (only data part).
+    /// Get the estimated size of the SSTable (not including bloom filter bits).
     pub fn estimated_size(&self) -> usize {
-        self.data.len() + self.block_meta_estimated_size + TABLE_EXTRA_FIELD_SIZE
+        self.data.len()
+            + self.block_meta_estimated_size
+            + TABLE_META_OFFSET_SIZE
+            + TABLE_BLOOM_OFFSET_SIZE
     }
 
     /// Builds the SSTable and writes it to the given path. Use the `FileObject` structure to manipulate the disk objects.
@@ -89,13 +101,22 @@ impl SsTableBuilder {
     ) -> Result<SsTable> {
         self.finish_current_block();
 
-        // buf = data + meta + meta_offset
+        // buf = data + meta(len + entries + checksum) + meta_offset + bloom(bits + k) + bloom_offset
+
+        // bloom meta section
         let mut buf = self.data;
         let meta_offset = buf.len();
         BlockMeta::encode_block_meta(&self.meta, &mut buf, self.block_meta_estimated_size);
         buf.put_u32(meta_offset as u32);
 
-        // TODO: bloom filter
+        // bloom filter section
+        let bloom = Bloom::build_from_key_hashes(
+            &self.key_hashes,
+            Bloom::bloom_bits_per_key(self.key_hashes.len(), BLOOM_EXPECTED_FALSE_POSITIVE_RATE),
+        );
+        let bloom_offset = buf.len();
+        bloom.encode(&mut buf);
+        buf.put_u32(bloom_offset as u32);
 
         let file = FileObject::create(path.as_ref(), buf)?;
         Ok(SsTable {
@@ -106,7 +127,7 @@ impl SsTableBuilder {
             block_meta: self.meta,
             block_meta_offset: meta_offset,
             block_cache,
-            bloom: None,
+            bloom: Some(bloom),
             max_ts: 0, // will be changed to latest ts in week 2
         })
     }
@@ -121,7 +142,7 @@ impl SsTableBuilder {
         let builder = std::mem::replace(&mut self.builder, BlockBuilder::new(self.block_size));
         let encoded_block = builder.build().encode();
 
-        self.block_meta_estimated_size += TABLE_OFFSET_SIZE
+        self.block_meta_estimated_size += TABLE_META_ENTRY_OFFSET_SIZE
             + KEY_LEN_SIZE
             + self.first_key.len()
             + KEY_LEN_SIZE

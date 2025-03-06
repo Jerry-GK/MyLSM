@@ -86,23 +86,23 @@ impl ReplHandler {
                     println!("invalid range in `FillRandom` command!");
                     return Ok(0);
                 }
-            
+
                 let mut keys: Vec<u64> = (*begin..=*end).collect();
                 use rand::seq::SliceRandom;
                 use rand::thread_rng;
-                
+
                 let mut rng = thread_rng();
                 keys.shuffle(&mut rng);
-            
+
                 for key in keys.iter() {
                     self.lsm.put(
                         format!("{}", key).as_bytes(),
                         format!("value{}@{}", key, self.epoch).as_bytes(),
                     )?;
                 }
-                
+
                 duration = start.elapsed().as_nanos();
-            
+
                 println!(
                     "{} values filled in random order within range [{}, {}] with epoch {}",
                     end - begin + 1,
@@ -232,7 +232,11 @@ impl ReplHandler {
                                     }
                                     let command_duration = self.handle(&command)?;
                                     duration += command_duration;
-                                    time_info.push(format!("(command<{}> - execution time: {:.4}ms)", line, (command_duration as f64) / 1000000.0))
+                                    time_info.push(format!(
+                                        "(command<{}> - execution time: {:.4}ms)",
+                                        line,
+                                        (command_duration as f64) / 1000000.0
+                                    ))
                                 }
                                 Err(e) => {
                                     println!("Invalid command: {}", e);
@@ -249,7 +253,7 @@ impl ReplHandler {
                             self.lsm.close()?;
                             std::process::exit(0);
                         }
-                    },
+                    }
                     Err(e) => {
                         println!("Failed to read script `{}`: {}", file_name, e);
                     }
@@ -556,7 +560,7 @@ fn main() -> Result<()> {
             enable_wal: args.enable_wal,
             serializable: args.serializable,
             block_cache_size: 2 << 25, // 32MB
-            // block_cache_size: 0, // 0MB
+                                       // block_cache_size: 0, // 0MB
         },
     )?;
 

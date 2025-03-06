@@ -22,7 +22,7 @@ use crate::{
     key::{KeySlice, KeyVec},
 };
 
-use super::{Block, BLOCK_EXTRA_FIELD_SIZE, BLOCK_OFFSET_SIZE, SIZEOF_U16};
+use super::{Block, BLOCK_DATA_ENTRY_OFFSET_SIZE, BLOCK_NUM_ELEMENT_SIZE, SIZEOF_U16};
 
 /// Builds a block.
 pub struct BlockBuilder {
@@ -45,7 +45,7 @@ impl BlockBuilder {
     }
 
     fn estimated_size(&self) -> usize {
-        BLOCK_EXTRA_FIELD_SIZE /* number of key-value pairs(Extra field) */ +  self.offsets.len() * BLOCK_OFFSET_SIZE /* offsets */ + self.data.len()
+        BLOCK_NUM_ELEMENT_SIZE /* number of key-value pairs(Extra field) */ +  self.offsets.len() * BLOCK_DATA_ENTRY_OFFSET_SIZE /* offsets */ + self.data.len()
         /* key-value pairs */
     }
 
@@ -59,7 +59,7 @@ impl BlockBuilder {
             + value.len()
             + KEY_LEN_SIZE
             + VALUE_LEN_SIZE
-            + BLOCK_OFFSET_SIZE
+            + BLOCK_DATA_ENTRY_OFFSET_SIZE
             > self.block_size
             && !self.is_empty()
         {
