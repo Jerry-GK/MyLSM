@@ -73,7 +73,7 @@ impl ReplHandler {
                         format!("value{}@{}", i, self.epoch).as_bytes(),
                     )?;
                 }
-                duration = start.elapsed().as_micros();
+                duration = start.elapsed().as_nanos();
 
                 println!(
                     "{} values filled with epoch {}",
@@ -101,7 +101,7 @@ impl ReplHandler {
                     )?;
                 }
                 
-                duration = start.elapsed().as_micros();
+                duration = start.elapsed().as_nanos();
             
                 println!(
                     "{} values filled in random order within range [{}, {}] with epoch {}",
@@ -116,22 +116,52 @@ impl ReplHandler {
                     format!("{}", key).as_bytes(),
                     format!("value{}@{}", value, self.epoch).as_bytes(),
                 )?;
-                duration = start.elapsed().as_micros();
+                duration = start.elapsed().as_nanos();
                 println!("put success with epoch {}", self.epoch);
             }
             Command::Del { key } => {
                 self.lsm.delete(key.as_bytes())?;
-                duration = start.elapsed().as_micros();
+                duration = start.elapsed().as_nanos();
                 println!("{} deleted", key);
             }
             Command::Get { key } => {
                 if let Some(value) = self.lsm.get(key.as_bytes())? {
-                    duration = start.elapsed().as_micros();
+                    duration = start.elapsed().as_nanos();
                     println!("{}={:?}", key, value);
                 } else {
-                    duration = start.elapsed().as_micros();
+                    duration = start.elapsed().as_nanos();
                     println!("{} not exist", key);
                 }
+            }
+            Command::GetRange { begin, end } => {
+                // use multiple get to implement scan, for test
+                if *begin > *end {
+                    println!("invalid range in `GetRange` command!");
+                    return Ok(0);
+                }
+
+                let mut cnt = 0;
+                let mut entries = Vec::new();
+                for i in *begin..=*end {
+                    let key_str = format!("{}", i);
+                    let key_bytes = key_str.as_bytes();
+                    if let Some(value) = self.lsm.get(key_bytes)? {
+                        entries.push((key_bytes.to_vec(), value));
+                        cnt += 1;
+                    }
+                }
+                duration = start.elapsed().as_nanos();
+
+                // // print is time consuming
+                // for (key, value) in entries {
+                //     println!(
+                //         "{:?}={:?}",
+                //         Bytes::copy_from_slice(&key),
+                //         Bytes::copy_from_slice(&value)
+                //     );
+                // }
+                // println!();
+                println!("get {} keys in range", cnt);
             }
             Command::Scan { begin, end } => match (begin, end) {
                 (None, None) => {
@@ -145,7 +175,7 @@ impl ReplHandler {
                         iter.next()?;
                         cnt += 1;
                     }
-                    duration = start.elapsed().as_micros();
+                    duration = start.elapsed().as_nanos();
 
                     // // print is time consuming
                     // for (key, value) in entries {
@@ -170,7 +200,7 @@ impl ReplHandler {
                         iter.next()?;
                         cnt += 1;
                     }
-                    duration = start.elapsed().as_micros();
+                    duration = start.elapsed().as_nanos();
 
                     // // print is time consuming
                     // for (key, value) in entries {
@@ -202,7 +232,7 @@ impl ReplHandler {
                                     }
                                     let command_duration = self.handle(&command)?;
                                     duration += command_duration;
-                                    time_info.push(format!("(command<{}> - execution time: {:.4}ms)", line, (command_duration as f64) / 1000.0))
+                                    time_info.push(format!("(command<{}> - execution time: {:.4}ms)", line, (command_duration as f64) / 1000000.0))
                                 }
                                 Err(e) => {
                                     println!("Invalid command: {}", e);
@@ -227,17 +257,17 @@ impl ReplHandler {
             }
             Command::Dump => {
                 self.lsm.dump_structure();
-                duration = start.elapsed().as_micros();
+                duration = start.elapsed().as_nanos();
                 println!("dump success");
             }
             Command::Flush => {
                 self.lsm.force_flush()?;
-                duration = start.elapsed().as_micros();
+                duration = start.elapsed().as_nanos();
                 println!("flush success");
             }
             Command::FullCompaction => {
                 self.lsm.force_full_compaction()?;
-                duration = start.elapsed().as_micros();
+                duration = start.elapsed().as_nanos();
                 println!("full compaction success");
             }
             Command::Quit => {
@@ -271,6 +301,10 @@ enum Command {
     },
     Get {
         key: String,
+    },
+    GetRange {
+        begin: u64,
+        end: u64,
     },
     Scan {
         begin: Option<String>,
@@ -349,6 +383,13 @@ impl Command {
             )(i)
         };
 
+        let get_range = |i| {
+            map(
+                tuple((tag_no_case("getrange"), space1, uint, space1, uint)),
+                |(_, _, begin, _, end)| Command::GetRange { begin, end },
+            )(i)
+        };
+
         let scan = |i| {
             map(
                 tuple((
@@ -377,6 +418,7 @@ impl Command {
                 put,
                 del,
                 get,
+                get_range,
                 scan,
                 execute,
                 map(tag_no_case("dump"), |_| Command::Dump),
@@ -418,7 +460,7 @@ impl Repl {
             match Command::parse(&readline) {
                 Ok(command) => {
                     let duration = self.handler.handle(&command)?;
-                    println!("(execution time: {:.4}ms)", (duration as f64) / 1000.0);
+                    println!("(execution time: {:.4}ms)", (duration as f64) / 1000000.0);
                     self.editor.add_history_entry(readline)?;
                 }
                 Err(e) => {
