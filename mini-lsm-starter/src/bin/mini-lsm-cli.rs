@@ -14,6 +14,7 @@
 
 mod wrapper;
 
+use clap::builder::Str;
 use rustyline::DefaultEditor;
 use wrapper::mini_lsm_wrapper;
 
@@ -29,6 +30,9 @@ use mini_lsm_wrapper::lsm_storage::{LsmStorageOptions, MiniLsm};
 use std::os::macos::raw::stat;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+const PUT_WITH_EPOCH: bool = true;
+const PRINT_RANGE_RESULT: bool = false;
 
 #[derive(Debug, Clone, ValueEnum)]
 enum CompactionStrategy {
@@ -70,7 +74,7 @@ impl ReplHandler {
                 for i in *begin..=*end {
                     self.lsm.put(
                         format!("{}", i).as_bytes(),
-                        format!("value{}@{}", i, self.epoch).as_bytes(),
+                        self.get_value_str(format!("{}", i)).as_bytes(),
                     )?;
                 }
                 duration = start.elapsed().as_nanos();
@@ -97,7 +101,7 @@ impl ReplHandler {
                 for key in keys.iter() {
                     self.lsm.put(
                         format!("{}", key).as_bytes(),
-                        format!("value{}@{}", key, self.epoch).as_bytes(),
+                        self.get_value_str(format!("{}", key)).as_bytes(),
                     )?;
                 }
 
@@ -114,7 +118,7 @@ impl ReplHandler {
             Command::Put { key, value } => {
                 self.lsm.put(
                     format!("{}", key).as_bytes(),
-                    format!("value{}@{}", value, self.epoch).as_bytes(),
+                    self.get_value_str(format!("{}", value)).as_bytes(),
                 )?;
                 duration = start.elapsed().as_nanos();
                 println!("put success with epoch {}", self.epoch);
@@ -152,15 +156,16 @@ impl ReplHandler {
                 }
                 duration = start.elapsed().as_nanos();
 
-                // // print is time consuming
-                // for (key, value) in entries {
-                //     println!(
-                //         "{:?}={:?}",
-                //         Bytes::copy_from_slice(&key),
-                //         Bytes::copy_from_slice(&value)
-                //     );
-                // }
-                // println!();
+                if PRINT_RANGE_RESULT {
+                    for (key, value) in entries {
+                        println!(
+                            "{:?}={:?}",
+                            Bytes::copy_from_slice(&key),
+                            Bytes::copy_from_slice(&value)
+                        );
+                    }
+                    println!();
+                }
                 println!("get {} keys in range", cnt);
             }
             Command::Scan { begin, end } => match (begin, end) {
@@ -177,15 +182,16 @@ impl ReplHandler {
                     }
                     duration = start.elapsed().as_nanos();
 
-                    // // print is time consuming
-                    // for (key, value) in entries {
-                    //     println!(
-                    //         "{:?}={:?}",
-                    //         Bytes::copy_from_slice(&key),
-                    //         Bytes::copy_from_slice(&value)
-                    //     );
-                    // }
-                    // println!();
+                    if PRINT_RANGE_RESULT {
+                        for (key, value) in entries {
+                            println!(
+                                "{:?}={:?}",
+                                Bytes::copy_from_slice(&key),
+                                Bytes::copy_from_slice(&value)
+                            );
+                        }
+                        println!();
+                    }
                     println!("{} keys scanned", cnt);
                 }
                 (Some(begin), Some(end)) => {
@@ -202,15 +208,16 @@ impl ReplHandler {
                     }
                     duration = start.elapsed().as_nanos();
 
-                    // // print is time consuming
-                    // for (key, value) in entries {
-                    //     println!(
-                    //         "{:?}={:?}",
-                    //         Bytes::copy_from_slice(&key),
-                    //         Bytes::copy_from_slice(&value)
-                    //     );
-                    // }
-                    // println!();
+                    if PRINT_RANGE_RESULT {
+                        for (key, value) in entries {
+                            println!(
+                                "{:?}={:?}",
+                                Bytes::copy_from_slice(&key),
+                                Bytes::copy_from_slice(&value)
+                            );
+                        }
+                        println!();
+                    }
                     println!("{} keys scanned", cnt);
                 }
                 _ => {
@@ -283,6 +290,14 @@ impl ReplHandler {
         self.epoch += 1;
 
         Ok(duration)
+    }
+
+    fn get_value_str(&self, str: String) -> String {
+        if PUT_WITH_EPOCH {
+            format!("value{}@{}", str, self.epoch)
+        } else {
+            str
+        }
     }
 }
 

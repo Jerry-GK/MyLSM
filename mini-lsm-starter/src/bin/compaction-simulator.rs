@@ -128,6 +128,7 @@ impl MockStorage {
             l0_sstables: Vec::new(),
             levels: Vec::new(),
             sstables: Default::default(),
+            memtable_freezed: false,
         };
         Self {
             snapshot,

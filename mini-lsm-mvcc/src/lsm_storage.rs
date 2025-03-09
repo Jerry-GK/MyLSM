@@ -56,6 +56,8 @@ pub struct LsmStorageState {
     pub levels: Vec<(usize, Vec<usize>)>,
     /// SST objects.
     pub sstables: HashMap<usize, Arc<SsTable>>,
+    /// if memtable has just been freeze
+    pub memtable_freezed: bool,
 }
 
 pub enum WriteBatchRecord<T: AsRef<[u8]>> {
@@ -80,6 +82,7 @@ impl LsmStorageState {
             l0_sstables: Vec::new(),
             levels,
             sstables: Default::default(),
+            memtable_freezed: false,
         }
     }
 }

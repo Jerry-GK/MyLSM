@@ -22,7 +22,7 @@ use crate::{
     key::{KeySlice, KeyVec},
 };
 
-use super::{Block, BLOCK_DATA_ENTRY_OFFSET_SIZE, BLOCK_NUM_ELEMENT_SIZE, SIZEOF_U16};
+use super::{Block, BLOCK_DATA_ENTRY_OFFSET_SIZE, BLOCK_NUM_ELEMENT_SIZE};
 
 /// Builds a block.
 pub struct BlockBuilder {
