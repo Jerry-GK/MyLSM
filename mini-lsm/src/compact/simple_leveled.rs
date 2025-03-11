@@ -80,6 +80,9 @@ impl SimpleLeveledCompactionController {
         // check size_ratio_percent for compaction of other levels (>= L1)
         for i in 1..self.options.max_levels {
             let lower_level = i + 1;
+            if level_sizes[i] == 0 {
+                continue;
+            }
             let size_ratio = level_sizes[lower_level] as f64 / level_sizes[i] as f64;
             if size_ratio < self.options.size_ratio_percent as f64 / 100.0 {
                 println!(
