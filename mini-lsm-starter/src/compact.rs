@@ -192,13 +192,17 @@ impl LsmStorageInner {
         };
 
         match _task {
-            CompactionTask::Leveled(task) => {
-                unimplemented!();
-            }
             CompactionTask::Tiered(task) => {
                 unimplemented!();
             }
             CompactionTask::Simple(SimpleLeveledCompactionTask {
+                upper_level,
+                upper_level_sst_ids,
+                lower_level: _,
+                lower_level_sst_ids,
+                ..
+            })
+            | CompactionTask::Leveled(LeveledCompactionTask {
                 upper_level,
                 upper_level_sst_ids,
                 lower_level: _,

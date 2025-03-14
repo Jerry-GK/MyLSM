@@ -427,46 +427,69 @@ impl LsmStorageInner {
             }
         }
 
-        // search the l0 sstables
-        let mut read_table_cnt = 0;
-        // chain l0_sstables and level tables together
-        let all_sstables: Vec<usize> = snapshot
-            .l0_sstables
-            .iter()
-            .chain(snapshot.levels.iter().flat_map(|(_, ids)| ids.iter()))
-            .copied()
-            .collect();
-
-        // search all sstables in level order, no need to search more sstables if found
-        for table in all_sstables.iter() {
-            let table = snapshot.sstables[table].clone();
-            let mut pruned = false;
-            if !key_within(
-                _key,
+        // prune ssts using key range and bloom filter
+        let prune_table = |key: &[u8], table: &SsTable| {
+            if key_within(
+                key,
                 table.first_key().as_key_slice(),
                 table.last_key().as_key_slice(),
             ) {
-                pruned = true;
-            }
-            if let Some(bloom) = &table.bloom {
-                if !bloom.may_contain(farmhash::fingerprint32(_key)) {
-                    pruned = true;
-                }
-            }
-
-            if !pruned {
-                let table_iter =
-                    SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(_key))?;
-                read_table_cnt += 1;
-                if table_iter.is_valid() && table_iter.key().raw_ref() == _key {
-                    if table_iter.value().is_empty() {
-                        return Ok(None); // it's different from ' b"" '
+                if let Some(bloom) = &table.bloom {
+                    if bloom.may_contain(farmhash::fingerprint32(key)) {
+                        return false;
+                    } else {
+                        return true; // pruned by bloom filter
                     }
-                    // println!("{} SSTs read", read_table_cnt); // for debug test
-                    return Ok(Some(Bytes::copy_from_slice(table_iter.value())));
+                } else {
+                    return false;
                 }
             }
-            // else skip this table
+            true // pruned by key range
+        };
+
+        let mut read_table_cnt = 0;
+
+        // search the l0 sstables
+        for table_id in snapshot.l0_sstables.iter() {
+            let table = snapshot.sstables[table_id].clone();
+            if prune_table(_key, &table) {
+                continue;
+            }
+            let table_iter =
+                SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(_key))?;
+            read_table_cnt += 1;
+            if table_iter.is_valid() && table_iter.key().raw_ref() == _key {
+                // println!("get: {} SSTs read, get at L0", read_table_cnt); // for debug test
+                if table_iter.value().is_empty() {
+                    return Ok(None); // it's different from ' b"" '
+                }
+                return Ok(Some(Bytes::copy_from_slice(table_iter.value())));
+            }
+        }
+
+        // search all sstables in level order, no need to search more sstables if found
+        let mut level_index = 0;
+        for (_, level_sst_ids) in &snapshot.levels {
+            level_index += 1;
+            let mut level_ssts = Vec::with_capacity(level_sst_ids.len());
+            for table in level_sst_ids {
+                let table = snapshot.sstables[table].clone();
+                if !prune_table(_key, &table) {
+                    level_ssts.push(table);
+                }
+            }
+            if level_ssts.is_empty() {
+                continue;
+            }
+            let level_iter = SstConcatIterator::create_and_seek_to_key(level_ssts, KeySlice::from_slice(_key))?;
+            read_table_cnt += 1;
+            if level_iter.is_valid() && level_iter.key().raw_ref() == _key {
+                // println!("get: {} SSTs read, get at L{}", read_table_cnt, level_index); // for debug test
+                if level_iter.value().is_empty() {
+                    return Ok(None); // it's different from ' b"" '
+                }
+                return Ok(Some(Bytes::copy_from_slice(level_iter.value())));
+            }
         }
 
         Ok(None)
