@@ -130,6 +130,7 @@ pub enum CompactionOptions {
 }
 
 impl LsmStorageInner {
+    // compact the given iterator to new compacted sstables, unified interface for all compaction types
     fn compact_to_sst_from_iter(
         &self,
         mut iter: impl for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
@@ -201,8 +202,25 @@ impl LsmStorageInner {
         };
 
         match _task {
-            CompactionTask::Tiered(task) => {
-                unimplemented!();
+            CompactionTask::Tiered(TieredCompactionTask {
+                tiers,
+                bottom_tier_included,
+            }) => {
+                let mut tier_iters = Vec::with_capacity(tiers.len());
+                for (tiere_id, tier_sst_ids) in tiers {
+                    let mut ssts = Vec::with_capacity(tier_sst_ids.len());
+                    for id in tier_sst_ids.iter() {
+                        assert!(snapshot.sstables.contains_key(id), "sstable {} not found", id);
+                        ssts.push(snapshot.sstables.get(id).unwrap().clone());
+                    }
+                    let tier_iter = SstConcatIterator::create_and_seek_to_first(ssts)?;
+                    tier_iters.push(Box::new(tier_iter));
+                }
+
+                self.compact_to_sst_from_iter(
+                    MergeIterator::create(tier_iters),
+                    _task.compact_to_bottom_level(),
+                )
             }
             CompactionTask::Simple(SimpleLeveledCompactionTask {
                 upper_level,

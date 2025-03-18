@@ -29,6 +29,7 @@ pub(crate) const BLOCK_DATA_ENTRY_OFFSET_SIZE: usize = SIZEOF_U16;
 pub(crate) const BLOCK_NUM_ELEMENT_SIZE: usize = SIZEOF_U16;
 
 /// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
+#[derive(Default)]
 pub struct Block {
     /// All serialized key-value pairs in the block. [Entry] = [key_len (2B) | key (keylen) | value_len (2B) | value (varlen)]
     pub(crate) data: Vec<u8>,
@@ -65,14 +66,5 @@ impl Block {
         // get data
         let data = data[0..data_end].to_vec();
         Self { data, offsets }
-    }
-}
-
-impl Default for Block {
-    fn default() -> Self {
-        Self {
-            data: Vec::new(),
-            offsets: Vec::new(),
-        }
     }
 }

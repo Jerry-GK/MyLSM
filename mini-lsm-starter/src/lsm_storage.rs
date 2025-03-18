@@ -75,7 +75,7 @@ impl LsmStorageState {
                 ..=*max_levels)
                 .map(|level| (level, Vec::new()))
                 .collect::<Vec<_>>(),
-            CompactionOptions::Tiered(_) => Vec::new(),
+            CompactionOptions::Tiered(_) => Vec::new(), // no max level for tiered compaction
             CompactionOptions::NoCompaction => vec![(1, Vec::new())],
         };
         Self {
@@ -331,7 +331,7 @@ impl LsmStorageInner {
         // } else {
         //     println!("next_sst_id: {} (compcation)", ret); // for debug test
         // }
-        return next_sst_id;
+        next_sst_id
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -473,9 +473,7 @@ impl LsmStorageInner {
         }
 
         // search all sstables in level order, no need to search more sstables if found
-        let mut level_index = 0;
-        for (_, level_sst_ids) in &snapshot.levels {
-            level_index += 1;
+        for (level_index, (_, level_sst_ids)) in snapshot.levels.iter().enumerate() {
             let mut level_ssts = Vec::with_capacity(level_sst_ids.len());
             for table in level_sst_ids {
                 let table = snapshot.sstables[table].clone();
@@ -517,10 +515,8 @@ impl LsmStorageInner {
         {
             let guard = self.state.read();
             if guard.memtable_freezed {
-                if guard.memtable_freezed {
-                    drop(guard);
-                    self.create_new_memtable();
-                }
+                drop(guard);
+                self.create_new_memtable();
             }
         }
 
@@ -637,7 +633,15 @@ impl LsmStorageInner {
         {
             let mut guard = self.state.write();
             let mut snapshot = guard.as_ref().clone();
-            snapshot.l0_sstables.insert(0, sst_id);
+
+            if self.compaction_controller.flush_to_l0() {
+                // flush to L0 as a buffer if not tiered compaction
+                snapshot.l0_sstables.insert(0, sst_id);
+            } else {
+                // flush to the newest created top level(also the top tier) if tiered compaction
+                snapshot.levels.insert(0, (sst_id, vec![sst_id]));
+            }
+
             snapshot.sstables.insert(sst_id, sst);
             // Remove the memtable from the immutable memtables.
             let mem = snapshot.imm_memtables.pop().unwrap();
