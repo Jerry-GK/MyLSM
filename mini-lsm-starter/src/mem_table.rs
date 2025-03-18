@@ -17,7 +17,7 @@
 
 use std::ops::Bound;
 use std::path::Path;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -41,6 +41,9 @@ pub struct MemTable {
     wal: Option<Wal>,
     id: usize,
     approximate_size: Arc<AtomicUsize>,
+    // is_freezed: true if just been flushed, set to false when newly created.
+    // memtable is invalid and regarded as empty when is_freezed is true even it has not been deleted.
+    is_freezed: Arc<AtomicBool>,
 }
 
 /// Create a bound of `Bytes` from a bound of `&[u8]`.
@@ -60,6 +63,7 @@ impl MemTable {
             map: Arc::new(SkipMap::new()),
             wal: None,
             approximate_size: Arc::new(AtomicUsize::new(0)),
+            is_freezed: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -161,9 +165,17 @@ impl MemTable {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    pub fn set_freezed(&self, freezed: bool) {
+        self.is_freezed.store(freezed, Ordering::SeqCst);
+    }
+
+    pub fn is_freezed(&self) -> bool {
+        self.is_freezed.load(Ordering::SeqCst)
+    }
+
     /// Only use this function when closing the database
     pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+        self.map.is_empty() || self.is_freezed()
     }
 }
 

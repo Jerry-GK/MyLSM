@@ -85,6 +85,8 @@ impl CompactionController {
         }
     }
 
+    // update state info after real compaction
+    // two use: 1. after compaction, 2. during recovery from mainfest
     pub fn apply_compaction_result(
         &self,
         snapshot: &LsmStorageState,
@@ -210,7 +212,11 @@ impl LsmStorageInner {
                 for (tiere_id, tier_sst_ids) in tiers {
                     let mut ssts = Vec::with_capacity(tier_sst_ids.len());
                     for id in tier_sst_ids.iter() {
-                        assert!(snapshot.sstables.contains_key(id), "sstable {} not found", id);
+                        assert!(
+                            snapshot.sstables.contains_key(id),
+                            "sstable {} not found",
+                            id
+                        );
                         ssts.push(snapshot.sstables.get(id).unwrap().clone());
                     }
                     let tier_iter = SstConcatIterator::create_and_seek_to_first(ssts)?;
@@ -347,6 +353,10 @@ impl LsmStorageInner {
 
             *self.state.write() = Arc::new(state);
             self.sync_dir()?;
+            self.manifest.as_ref().unwrap().add_record(
+                &state_lock,
+                ManifestRecord::Compaction(compaction_task, new_sst_ids.clone()),
+            )?;
         }
         // remove the original SST files
         for sst in l0_sstables.iter().chain(l1_sstables.iter()) {
@@ -397,11 +407,12 @@ impl LsmStorageInner {
             let mut state = self.state.write();
             *state = Arc::new(snapshot);
             drop(state);
+
             self.sync_dir()?;
-            // self.manifest
-            //     .as_ref()
-            //     .unwrap()
-            //     .add_record(&state_lock, ManifestRecord::Compaction(task, new_sst_ids))?;
+            self.manifest
+                .as_ref()
+                .unwrap()
+                .add_record(&state_lock, ManifestRecord::Compaction(task, new_sst_ids))?;
             ssts_to_remove
         };
         println!(
