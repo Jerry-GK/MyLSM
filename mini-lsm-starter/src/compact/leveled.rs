@@ -160,7 +160,7 @@ impl LeveledCompactionController {
             // TODO: why only compact one sst? is there a better way to select sst to compact?
             let selected_sst = _snapshot.levels[level - 1].1.iter().min().copied().unwrap(); // select the oldest sst to compact
             println!(
-                "L1+ scompaction triggered by priority: {level} out of {:?}, select {selected_sst} for compaction",
+                "L1+ compaction triggered by priority: {level} out of {:?}, select {selected_sst} for compaction",
                 priorities
             );
             return Some(LeveledCompactionTask {
@@ -262,6 +262,16 @@ impl LeveledCompactionController {
         }
         snapshot.levels[_task.lower_level - 1].1 = new_lower_level_ssts;
 
+        // // println the id, first key, last key of the removed sstables
+        // for sstid in files_to_remove.iter() {
+        //     let sst = snapshot.sstables.get(sstid).unwrap();
+        //     println!(
+        //         "remove sstable: id={}, first_key={:?}, last_key={:?}",
+        //         sst.sst_id(),
+        //         sst.first_key(),
+        //         sst.last_key()
+        //     );
+        // }
         (snapshot, files_to_remove)
     }
 }

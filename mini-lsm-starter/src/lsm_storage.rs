@@ -79,12 +79,12 @@ impl LsmStorageState {
             CompactionOptions::NoCompaction => vec![(1, Vec::new())],
         };
         Self {
-            memtable: Arc::new(MemTable::create(0)),
+            memtable: Arc::new(MemTable::create(0)), // no use
             imm_memtables: Vec::new(),
             l0_sstables: Vec::new(),
             levels,
             sstables: Default::default(),
-            memtable_freezed: false,
+            memtable_freezed: true,
         }
     }
 }
@@ -322,10 +322,16 @@ impl MiniLsm {
 
 impl LsmStorageInner {
     // return the id of next sst table to push into the flush queue, which is the id of the latest creaeted immutable memtable
-    pub(crate) fn next_sst_id(&self) -> usize {
-        self.next_sst_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1
+    pub(crate) fn next_sst_id(&self, is_new_mem_table: bool) -> usize {
+        let next_sst_id = self
+            .next_sst_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // if is_new_mem_table {
+        //     println!("next_sst_id: {} (new_mem_table)", ret); // for debug test
+        // } else {
+        //     println!("next_sst_id: {} (compcation)", ret); // for debug test
+        // }
+        return next_sst_id;
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -374,7 +380,6 @@ impl LsmStorageInner {
 
         // TODO: codes about WAL and compaction
 
-        state.memtable = Arc::new(MemTable::create(next_sst_id));
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
@@ -481,10 +486,18 @@ impl LsmStorageInner {
             if level_ssts.is_empty() {
                 continue;
             }
-            let level_iter = SstConcatIterator::create_and_seek_to_key(level_ssts, KeySlice::from_slice(_key))?;
+            let level_iter =
+                SstConcatIterator::create_and_seek_to_key(level_ssts, KeySlice::from_slice(_key))?;
             read_table_cnt += 1;
             if level_iter.is_valid() && level_iter.key().raw_ref() == _key {
-                // println!("get: {} SSTs read, get at L{}", read_table_cnt, level_index); // for debug test
+                // println!(
+                //     "get {:?}, value = {:?}: {} SSTs read, get at L{}, sst-{}",
+                //     std::str::from_utf8(_key),
+                //     std::str::from_utf8(level_iter.value()),
+                //     read_table_cnt,
+                //     level_index,
+                //     level_iter.current_sstable().unwrap().sst_id()
+                // ); // for debug test
                 if level_iter.value().is_empty() {
                     return Ok(None); // it's different from ' b"" '
                 }
@@ -501,21 +514,36 @@ impl LsmStorageInner {
     }
 
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
-        let size;
         {
             let guard = self.state.read();
             if guard.memtable_freezed {
-                drop(guard);
-                self.create_new_memtable();
+                if guard.memtable_freezed {
+                    drop(guard);
+                    self.create_new_memtable();
+                }
             }
         }
+
         {
+            let state_lock = self.state_lock.lock();
             let guard = self.state.read();
             guard.memtable.put(_key, _value)?;
-            size = guard.memtable.approximate_size();
+            // println!(
+            //     "put: key = {:?}, value = {:?}, memtable_ssid = {:?}, memtable_size = {:?}",
+            //     std::str::from_utf8(_key),
+            //     std::str::from_utf8(_value),
+            //     guard.memtable.id(),
+            //     guard.memtable.approximate_size()
+            // ); // for debug test
+
+            // try freeze
+            if guard.memtable.approximate_size() >= self.options.target_sst_size {
+                // println!("try_freeze: memtable_ssid = {:?}, approximate_size = {:?}", guard.memtable.id(), guard.memtable.approximate_size()); // for debug test
+                drop(guard);
+                self.force_freeze_memtable(&state_lock)?;
+            }
         }
 
-        self.try_freeze(size)?;
         Ok(())
     }
 
@@ -527,7 +555,7 @@ impl LsmStorageInner {
     fn create_new_memtable(&self) {
         let mut guard = self.state.write();
         let mut snapshot: LsmStorageState = guard.as_ref().clone();
-        let memtable_id = self.next_sst_id();
+        let memtable_id = self.next_sst_id(true);
         snapshot.memtable = Arc::new(MemTable::create(memtable_id));
         snapshot.memtable_freezed = false;
         *guard = Arc::new(snapshot);
@@ -539,6 +567,7 @@ impl LsmStorageInner {
             let guard = self.state.read();
             // the memtable could have already been frozen, check again to ensure we really need to freeze
             if guard.memtable.approximate_size() >= self.options.target_sst_size {
+                // println!("try_freeze: memtable_ssid = {:?}, approximate_size = {:?}", guard.memtable.id(), guard.memtable.approximate_size()); // for debug test
                 drop(guard);
                 self.force_freeze_memtable(&state_lock)?;
             }
@@ -616,6 +645,7 @@ impl LsmStorageInner {
             *guard = Arc::new(snapshot);
         }
 
+        // println!("force_flush_next_imm_memtable: sst-{} flushed", sst_id); // for debug test
         self.sync_dir()?;
         Ok(())
     }

@@ -83,6 +83,11 @@ impl SsTableIterator {
         self.blk_iter = blk_iter;
         Ok(())
     }
+
+    // for debug
+    pub fn table(&self) -> &Arc<SsTable> {
+        &self.table
+    }
 }
 
 impl StorageIterator for SsTableIterator {

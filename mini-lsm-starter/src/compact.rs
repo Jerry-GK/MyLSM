@@ -158,7 +158,7 @@ impl LsmStorageInner {
             iter.next()?;
 
             if builder_inner.estimated_size() >= self.options.target_sst_size {
-                let sst_id = self.next_sst_id();
+                let sst_id = self.next_sst_id(false);
                 let builder = builder.take().unwrap();
                 let sst = Arc::new(builder.build(
                     sst_id,
@@ -173,7 +173,7 @@ impl LsmStorageInner {
         // generate the last sst
         if !create_builder {
             // avoid creating empty sst
-            let sst_id = self.next_sst_id(); // lock dropped here
+            let sst_id = self.next_sst_id(false); // lock dropped here
             let sst = Arc::new(builder.unwrap().build(
                 sst_id,
                 Some(self.block_cache.clone()),
@@ -182,6 +182,15 @@ impl LsmStorageInner {
             new_sst.push(sst);
         }
 
+        // // println the id, first key, last key of the new sstables
+        // for sst in new_sst.iter() {
+        //     println!(
+        //         "new sstable: id={}, first_key={:?}, last_key={:?}",
+        //         sst.sst_id(),
+        //         sst.first_key(),
+        //         sst.last_key()
+        //     );
+        // }
         Ok(new_sst)
     }
 
@@ -388,6 +397,8 @@ impl LsmStorageInner {
         }
         self.sync_dir()?;
 
+        // print the level structre after compaction
+        self.dump_structure();
         Ok(())
     }
 

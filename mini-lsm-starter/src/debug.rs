@@ -16,6 +16,7 @@ use crate::lsm_storage::{LsmStorageInner, MiniLsm};
 
 impl LsmStorageInner {
     pub fn dump_structure(&self) {
+        println!("dump level structure:");
         let snapshot = self.state.read();
         if !snapshot.l0_sstables.is_empty() {
             println!(

@@ -108,6 +108,11 @@ impl SstConcatIterator {
         }
         Ok(())
     }
+
+    // for debug
+    pub fn current_sstable(&self) -> Option<&Arc<SsTable>> {
+        self.current.as_ref().map(|iter| iter.table())
+    }
 }
 
 impl StorageIterator for SstConcatIterator {
