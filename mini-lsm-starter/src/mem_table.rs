@@ -28,7 +28,7 @@ use ouroboros::self_referencing;
 
 use crate::block::{BLOCK_DATA_ENTRY_OFFSET_SIZE, KEY_LEN_SIZE, VALUE_LEN_SIZE};
 use crate::iterators::StorageIterator;
-use crate::key::{Key, KeySlice};
+use crate::key::KeySlice;
 use crate::table::SsTableBuilder;
 use crate::wal::Wal;
 

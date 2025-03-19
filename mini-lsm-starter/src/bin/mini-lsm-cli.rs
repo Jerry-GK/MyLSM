@@ -14,7 +14,6 @@
 
 mod wrapper;
 
-use clap::builder::Str;
 use rustyline::DefaultEditor;
 use wrapper::mini_lsm_wrapper;
 
@@ -27,7 +26,6 @@ use mini_lsm_wrapper::compact::{
 };
 use mini_lsm_wrapper::iterators::StorageIterator;
 use mini_lsm_wrapper::lsm_storage::{LsmStorageOptions, MiniLsm};
-use std::os::macos::raw::stat;
 use std::path::PathBuf;
 use std::sync::Arc;
 

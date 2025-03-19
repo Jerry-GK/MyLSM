@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # loop number
-N=100
+N=1000
 FILE_NAME="loop_test_log.txt"
-COMMAND="RUST_BACKTRACE=1 cargo test week2_day3 -- --nocapture >> $FILE_NAME 2>&1"
+COMMAND="RUST_BACKTRACE=1 cargo x scheck >> $FILE_NAME 2>&1"
 
+rm -f $FILE_NAME
 for ((i=1; i<=N; i++))
 do
     echo "Running command for the $i time..."

@@ -19,7 +19,7 @@ use bytes::BufMut;
 
 use crate::{
     block::{KEY_LEN_SIZE, VALUE_LEN_SIZE},
-    key::{KeySlice, KeyVec},
+    key::KeySlice,
 };
 
 use super::{Block, BLOCK_DATA_ENTRY_OFFSET_SIZE, BLOCK_NUM_ELEMENT_SIZE};

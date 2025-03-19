@@ -16,8 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::{BTreeSet, HashMap};
-use std::fs::{read, File};
-use std::mem;
+use std::fs::File;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
@@ -333,15 +332,8 @@ impl MiniLsm {
 impl LsmStorageInner {
     // return the id of next sst table to push into the flush queue, which is the id of the latest creaeted immutable memtable
     pub(crate) fn next_sst_id(&self, is_new_mem_table: bool) -> usize {
-        let next_sst_id = self
-            .next_sst_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        // if is_new_mem_table {
-        //     println!("next_sst_id: {} (new_mem_table)", ret); // for debug test
-        // } else {
-        //     println!("next_sst_id: {} (compcation)", ret); // for debug test
-        // }
-        next_sst_id
+        self.next_sst_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does

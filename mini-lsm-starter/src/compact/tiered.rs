@@ -65,15 +65,16 @@ impl TieredCompactionController {
             / (_snapshot.levels.last().unwrap().1.len() as f64)
             * 100.0;
         if space_amp_ratio >= self.options.max_size_amplification_percent as f64 {
+            let bottom_tier_included = true;
             println!(
                 "compaction triggered by space amplification ratio: {}, compact L1~{}, bottom_tier_included = {}",
                 space_amp_ratio,
                 _snapshot.levels.len(),
-                true,
+                bottom_tier_included,
             );
             return Some(TieredCompactionTask {
                 tiers: _snapshot.levels.clone(),
-                bottom_tier_included: true,
+                bottom_tier_included,
             });
         }
 

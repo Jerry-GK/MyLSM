@@ -19,10 +19,7 @@ use std::sync::Arc;
 
 use bytes::Buf;
 
-use crate::{
-    block::SIZEOF_U16,
-    key::{KeySlice, KeyVec},
-};
+use crate::key::{KeySlice, KeyVec};
 
 use super::{Block, KEY_LEN_SIZE, VALUE_LEN_SIZE};
 

@@ -26,7 +26,7 @@ use super::{
     BlockMeta, FileObject, SsTable, TABLE_BLOOM_OFFSET_SIZE, TABLE_META_ENTRY_OFFSET_SIZE,
     TABLE_META_OFFSET_SIZE,
 };
-use crate::block::{BlockBuilder, BLOCK_DATA_ENTRY_OFFSET_SIZE, KEY_LEN_SIZE, SIZEOF_U16};
+use crate::block::{BlockBuilder, KEY_LEN_SIZE};
 use crate::key::{KeySlice, KeyVec};
 use crate::lsm_storage::BlockCache;
 

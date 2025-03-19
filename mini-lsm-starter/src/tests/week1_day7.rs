@@ -15,7 +15,7 @@
 use tempfile::tempdir;
 
 use crate::{
-    key::{KeySlice, TS_ENABLED},
+    key::KeySlice,
     table::{bloom::Bloom, FileObject, SsTable, SsTableBuilder},
 };
 
