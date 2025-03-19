@@ -340,7 +340,7 @@ impl LsmStorageInner {
         println!("Opening storage at {:?}", path.as_ref());
         let mut state = LsmStorageState::create(&options);
         let path = path.as_ref();
-        let mut next_sst_id = 1; // sst id starts with 1
+        let mut next_sst_id = 0; // it will increase by 1 later during initialization
         let block_cache = Arc::new(BlockCache::new(options.block_cache_size));
         let manifest;
 
@@ -380,15 +380,17 @@ impl LsmStorageInner {
                         }
                         next_sst_id = next_sst_id.max(sst_id);
                     }
-                    ManifestRecord::NewMemtable(x) => {
-                        next_sst_id = next_sst_id.max(x);
-                        memtables.insert(x);
+                    ManifestRecord::NewMemtable(sst_id) => {
+                        next_sst_id = next_sst_id.max(sst_id);
+                        memtables.insert(sst_id);
                     }
                     ManifestRecord::Compaction(task, output) => {
                         let (new_state, files_to_remove) = compaction_controller
                             .apply_compaction_result(&state, &task, &output, true);
+                        // Q: do we need to apply remove?
                         state = new_state;
-                        next_sst_id = next_sst_id.max(output.iter().max().copied().unwrap_or_default());
+                        next_sst_id =
+                            next_sst_id.max(output.iter().max().copied().unwrap_or_default());
                     }
                 }
             }
@@ -428,6 +430,8 @@ impl LsmStorageInner {
 
             manifest = m;
         }
+
+        next_sst_id += 1;   // 1 if no manifest, or the max id + 1
 
         // TODO: codes about WAL
 
