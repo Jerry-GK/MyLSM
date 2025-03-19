@@ -284,14 +284,18 @@ impl MiniLsm {
     }
 
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        assert!(!key.is_empty(), "key cannot be empty");
         self.inner.get(key)
     }
 
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
+        assert!(!key.is_empty(), "key cannot be empty");
+        assert!(!value.is_empty(), "value cannot be empty");
         self.inner.put(key, value)
     }
 
     pub fn delete(&self, key: &[u8]) -> Result<()> {
+        assert!(!key.is_empty(), "key cannot be empty");
         self.inner.delete(key)
     }
 
@@ -583,7 +587,23 @@ impl LsmStorageInner {
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
     pub fn write_batch<T: AsRef<[u8]>>(&self, _batch: &[WriteBatchRecord<T>]) -> Result<()> {
-        unimplemented!()
+        for record in _batch {
+            match record {
+                WriteBatchRecord::Del(key) => {
+                    let key = key.as_ref();
+                    assert!(!key.is_empty(), "key cannot be empty");
+                    self.put(key, b"")?;
+                }
+                WriteBatchRecord::Put(key, value) => {
+                    let key = key.as_ref();
+                    let value = value.as_ref();
+                    assert!(!key.is_empty(), "key cannot be empty");
+                    assert!(!value.is_empty(), "value cannot be empty");
+                    self.put(key, value)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
