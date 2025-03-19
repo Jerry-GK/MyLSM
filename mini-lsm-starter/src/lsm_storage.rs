@@ -17,6 +17,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{read, File};
+use std::mem;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
@@ -232,6 +233,11 @@ impl MiniLsm {
         }
 
         // TODO: return directly without flush if enable wal
+        if self.inner.options.enable_wal {
+            self.inner.sync_wal()?;
+            self.inner.sync_dir()?;
+            return Ok(());
+        }
 
         if !self.inner.state.read().memtable.is_empty() {
             self.inner
@@ -290,7 +296,7 @@ impl MiniLsm {
     }
 
     pub fn sync(&self) -> Result<()> {
-        self.inner.sync()
+        self.inner.sync_wal()
     }
 
     pub fn scan(
@@ -364,6 +370,7 @@ impl LsmStorageInner {
         let manifest_path = path.join("MANIFEST");
         if !manifest_path.exists() {
             manifest = Manifest::create(&manifest_path).context("failed to create manifest")?;
+            // create the new memtable at the first put after flush or initialization, no need to create here
         } else {
             // redo the manifest records to recover the state
             let (m, records) = Manifest::recover(&manifest_path)?;
@@ -428,12 +435,24 @@ impl LsmStorageInner {
                 }
             }
 
+            // recover memtables to imm_memtables
+            if options.enable_wal {
+                let mut wal_num = 0;
+                for id in memtables.iter() {
+                    let memtable =
+                        MemTable::recover_from_wal(*id, Self::path_of_wal_static(path, *id))?;
+                    if !memtable.is_empty() {
+                        state.imm_memtables.insert(0, Arc::new(memtable));
+                        wal_num += 1;
+                    }
+                }
+                println!("{} WALs recovered", wal_num);
+            }
+
             manifest = m;
         }
 
-        next_sst_id += 1;   // 1 if no manifest, or the max id + 1
-
-        // TODO: codes about WAL
+        next_sst_id += 1; // 1 if no manifest, or the max id + 1 (imoportant code line!)
 
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
@@ -453,8 +472,8 @@ impl LsmStorageInner {
         Ok(storage)
     }
 
-    pub fn sync(&self) -> Result<()> {
-        unimplemented!()
+    pub fn sync_wal(&self) -> Result<()> {
+        self.state.read().memtable.sync_wal()
     }
 
     pub fn add_compaction_filter(&self, compaction_filter: CompactionFilter) {
@@ -604,11 +623,19 @@ impl LsmStorageInner {
         self.put(_key, b"")
     }
 
+    // the only method to create a new valid memtable (only called before the first put after a flush or initialization)
     fn create_new_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
         let mut guard = self.state.write();
         let mut snapshot: LsmStorageState = guard.as_ref().clone();
         let memtable_id = self.next_sst_id(true);
-        snapshot.memtable = Arc::new(MemTable::create(memtable_id));
+        if self.options.enable_wal {
+            snapshot.memtable = Arc::new(MemTable::create_with_wal(
+                memtable_id,
+                self.path_of_wal(memtable_id),
+            )?);
+        } else {
+            snapshot.memtable = Arc::new(MemTable::create(memtable_id));
+        }
         snapshot.memtable_freezed = false;
         *guard = Arc::new(snapshot);
         drop(guard);
@@ -663,6 +690,7 @@ impl LsmStorageInner {
         snapshot.imm_memtables.insert(0, snapshot.memtable.clone());
         snapshot.memtable_freezed = true;
         snapshot.memtable.set_freezed(true);
+        snapshot.memtable.sync_wal()?;
 
         // Update the snapshot.
         *guard = Arc::new(snapshot);
@@ -728,7 +756,12 @@ impl LsmStorageInner {
             *guard = Arc::new(snapshot);
         }
 
-        // println!("force_flush_next_imm_memtable: sst-{} flushed", sst_id); // for debug test
+        println!("force_flush_next_imm_memtable: sst-{} flushed", sst_id); // for debug test
+
+        // remove the wal file after flush
+        if self.options.enable_wal {
+            std::fs::remove_file(self.path_of_wal(sst_id))?;
+        }
 
         self.manifest
             .as_ref()

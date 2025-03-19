@@ -53,6 +53,7 @@ impl Manifest {
     }
 
     pub fn recover(_path: impl AsRef<Path>) -> Result<(Self, Vec<ManifestRecord>)> {
+        // manifest entry: | len | JSON record | checksum |
         let mut file = OpenOptions::new()
             .read(true)
             .append(true)
@@ -62,7 +63,6 @@ impl Manifest {
         file.read_to_end(&mut buf)?;
         let mut buf_ptr = buf.as_slice();
         let mut records = Vec::new();
-        // entry: len-json_record-checksum
         while buf_ptr.has_remaining() {
             let len = buf_ptr.get_u64();
             let slice = &buf_ptr[..len as usize];
@@ -91,7 +91,7 @@ impl Manifest {
     }
 
     pub fn add_record_when_init(&self, _record: ManifestRecord) -> Result<()> {
-        // entry: len-json_record-checksum
+        // manifest entry: | len | JSON record | checksum |
         let mut file = self.file.lock();
         let mut buf = serde_json::to_vec(&_record)?;
         let hash = crc32fast::hash(&buf);
