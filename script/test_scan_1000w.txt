@@ -1,0 +1,5 @@
+fill 1000000 9999999
+flush
+scan
+scan 3000000 6000000
+quit

@@ -1,0 +1,4 @@
+fill 100000 999999
+flush
+getrange 100000 999999
+quit

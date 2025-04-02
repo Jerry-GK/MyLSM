@@ -302,7 +302,11 @@ impl MiniLsm {
         self.inner.sync_wal()
     }
 
-    pub fn scan(
+    pub fn scan_all(&self) -> Result<FusedIterator<LsmIterator>> {
+        self.inner.scan(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+    }
+
+    pub fn scan_range(
         &self,
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,

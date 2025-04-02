@@ -1,0 +1,10 @@
+fill 1000 3000
+flush
+fill 1000 3000
+flush
+full_compaction
+fill 1000 3000
+flush
+full_compaction
+get 2333
+scan 2000 2333

@@ -1,0 +1,4 @@
+fillrandom 1000000 9999999
+scan
+getrange 1000000 9999999
+quit

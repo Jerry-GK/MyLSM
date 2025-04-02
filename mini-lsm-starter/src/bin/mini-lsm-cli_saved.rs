@@ -14,11 +14,6 @@
 
 mod wrapper;
 
-use rand::seq::SliceRandom;
-use rand::SeedableRng;
-use rand::distributions::Alphanumeric;
-use rand::rngs::StdRng;
-use rand::Rng;
 use rustyline::DefaultEditor;
 use wrapper::mini_lsm_wrapper;
 
@@ -36,8 +31,6 @@ use std::sync::Arc;
 
 const PUT_WITH_EPOCH: bool = true;
 const PRINT_RANGE_RESULT: bool = false;
-const KEY_LEN: usize = 24;
-const VALUE_LEN: usize = 2000;
 
 #[derive(Debug, Clone, ValueEnum)]
 enum CompactionStrategy {
@@ -63,7 +56,6 @@ struct Args {
 struct ReplHandler {
     epoch: u64,
     lsm: Arc<MiniLsm>,
-    rng: StdRng,
 }
 
 impl ReplHandler {
@@ -97,21 +89,17 @@ impl ReplHandler {
                     return Ok(0);
                 }
 
-                let mut key_value_pairs: Vec<(String, String)> = Vec::with_capacity((end - begin + 1) as usize);
-                for i in *begin..=*end {
-                    let key = self.gen_key(i, KEY_LEN);
-                    let cloned_key = key.clone();
-                    let value = self.gen_value(cloned_key, VALUE_LEN);
-                    key_value_pairs.push((key, value));
-                }
+                let mut keys: Vec<u64> = (*begin..=*end).collect();
+                use rand::seq::SliceRandom;
+                use rand::thread_rng;
 
-                let mut rng: StdRng = StdRng::from_entropy();
-                key_value_pairs.shuffle(&mut rng);
+                let mut rng = thread_rng();
+                keys.shuffle(&mut rng);
 
-                for (key, value) in key_value_pairs.iter() {
+                for key in keys.iter() {
                     self.lsm.put(
                         format!("{}", key).as_bytes(),
-                        value.as_bytes(),
+                        self.get_value_str(format!("{}", key)).as_bytes(),
                     )?;
                 }
 
@@ -157,7 +145,7 @@ impl ReplHandler {
                 let mut cnt = 0;
                 let mut entries = Vec::new();
                 for i in *begin..=*end {
-                    let key_str = self.gen_key(i, KEY_LEN);
+                    let key_str = format!("{}", i);
                     let key_bytes = key_str.as_bytes();
                     if let Some(value) = self.lsm.get(key_bytes)? {
                         entries.push((key_bytes.to_vec(), value));
@@ -177,44 +165,6 @@ impl ReplHandler {
                     println!();
                 }
                 println!("get {} keys in range", cnt);
-            }
-            Command::GetRandom { begin, end } => {
-                // use multiple get to implement scan, for test
-                if *begin > *end {
-                    println!("invalid range in `GetRandom` command!");
-                    return Ok(0);
-                }
-
-                let mut keys: Vec<u64> = (*begin..=*end).collect();
-                use rand::seq::SliceRandom;
-                use rand::thread_rng;
-
-                let mut rng = thread_rng();
-                keys.shuffle(&mut rng);
-
-                let mut cnt = 0;
-                let mut entries = Vec::new();
-                for i in keys.iter() {
-                    let key_str = self.gen_key(*i, KEY_LEN);
-                    let key_bytes = key_str.as_bytes();
-                    if let Some(value) = self.lsm.get(key_bytes)? {
-                        entries.push((key_bytes.to_vec(), value));
-                        cnt += 1;
-                    }
-                }
-                duration = start.elapsed().as_nanos();
-
-                if PRINT_RANGE_RESULT {
-                    for (key, value) in entries {
-                        println!(
-                            "{:?}={:?}",
-                            Bytes::copy_from_slice(&key),
-                            Bytes::copy_from_slice(&value)
-                        );
-                    }
-                    println!();
-                }
-                println!("get {} keys in range randomly", cnt);
             }
             Command::Scan { begin, end } => match (begin, end) {
                 (None, None) => {
@@ -347,31 +297,6 @@ impl ReplHandler {
             str
         }
     }
-
-    fn gen_random_string(&mut self, len: usize) -> String {
-        let mut result = String::with_capacity(len);
-        for _ in 0..len {
-            let c: u8 = self.rng.sample(Alphanumeric);
-            result.push(c as char);
-        }
-        result
-    }
-
-    fn gen_key(&mut self, i: u64, len: usize) -> String {
-        let prefix_len = len - i.to_string().len();
-        assert!(prefix_len >= 0);
-        // key prefix is all 0
-        let prefix = "0".repeat(prefix_len);
-        format!("{}{}", prefix, i)
-    }
-
-    fn gen_value(&mut self, key: String, len: usize) -> String {
-        let prefix_len = len - key.len();
-        assert!(prefix_len >= 0);
-        // value prefix is a random string
-        let prefix = self.gen_random_string(prefix_len);
-        format!("{}{}", prefix, key)
-    }
 }
 
 #[derive(Debug)]
@@ -395,10 +320,6 @@ enum Command {
         key: String,
     },
     GetRange {
-        begin: u64,
-        end: u64,
-    },
-    GetRandom {
         begin: u64,
         end: u64,
     },
@@ -486,13 +407,6 @@ impl Command {
             )(i)
         };
 
-        let get_random = |i| {
-            map(
-                tuple((tag_no_case("getrandom"), space1, uint, space1, uint)),
-                |(_, _, begin, _, end)| Command::GetRandom { begin, end },
-            )(i)
-        };
-
         let scan = |i| {
             map(
                 tuple((
@@ -522,7 +436,6 @@ impl Command {
                 del,
                 get,
                 get_range,
-                get_random,
                 scan,
                 execute,
                 map(tag_no_case("dump"), |_| Command::Dump),
@@ -630,7 +543,7 @@ fn main() -> Result<()> {
         args.path,
         LsmStorageOptions {
             block_size: 4096,         // 4KB
-            target_sst_size: 64 * 1024 * 1024, // 64MB
+            target_sst_size: 2 << 20, // 2MB
             num_memtable_limit: 3,
             compaction_options: match args.compaction {
                 CompactionStrategy::None => CompactionOptions::NoCompaction,
@@ -659,7 +572,7 @@ fn main() -> Result<()> {
             },
             enable_wal: args.enable_wal,
             serializable: args.serializable,
-            block_cache_size: 8 * 1024 * 1024, // 8MB
+            block_cache_size: 2 << 25, // 32MB
                                        // block_cache_size: 0, // 0MB
         },
     )?;
@@ -668,11 +581,7 @@ fn main() -> Result<()> {
         .app_name("mini-lsm-cli")
         .description("A CLI for mini-lsm")
         .prompt("mini-lsm-cli> ")
-        .build(ReplHandler {
-            epoch: 0,
-            lsm:lsm,
-            rng: StdRng::from_entropy(),
-        })?;
+        .build(ReplHandler { epoch: 0, lsm })?;
 
     repl.run()?;
     Ok(())
