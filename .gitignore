@@ -6,3 +6,4 @@ lsm.db/
 *.DS_Store
 profile/
 *_log.txt
+perf.data

@@ -1,4 +1,4 @@
 fillrandom 100000 999999
 scan
-getrandom 100000 999999e
+getrandom 100000 999999
 quit
